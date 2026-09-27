@@ -604,26 +604,64 @@ const LOGIN_HTML = `<!doctype html>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>supervisord-center 登录</title>
 <style>
- body{font:15px/1.6 system-ui,"Segoe UI",sans-serif;background:#111417;color:#e6e6e6;
-      display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
- .box{background:#1a1f24;padding:28px 30px;border-radius:12px;width:min(92vw,380px);
-      border:1px solid #2b3238}
- h1{font-size:17px;margin:0 0 4px}
- p{color:#8b949e;font-size:13px;margin:0 0 18px}
- input{width:100%;box-sizing:border-box;padding:11px 12px;border-radius:8px;
-       border:1px solid #30363d;background:#0d1117;color:#e6e6e6;font-size:14px}
- button{width:100%;margin-top:12px;padding:11px;border:0;border-radius:8px;
-        background:#2f81f7;color:#fff;font-size:14px;font-weight:600;cursor:pointer}
- button:hover{background:#4a92f8}
- .err{color:#f85149;font-size:13px;margin-top:10px;min-height:18px}
- code{background:#0d1117;padding:2px 5px;border-radius:4px;font-size:12px}
+ :root{
+   color-scheme:dark;
+   --bg:#0b0f14; --face:#121820; --rule:#232c38;
+   --text:#dce3ec; --dim:#7b8798; --amber:#e3a008; --dead:#ff5d5d;
+ }
+ *{box-sizing:border-box}
+ html,body{margin:0}
+ body{
+   min-height:100vh; min-height:100dvh;
+   background:radial-gradient(120% 80% at 50% -10%,#16202b 0,transparent 60%),var(--bg);
+   color:var(--text); display:grid; place-items:center; padding:20px;
+   padding-bottom:max(20px,env(safe-area-inset-bottom));
+   font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+   -webkit-tap-highlight-color:transparent;
+ }
+ .login-wrap{
+   width:min(100%,360px); background:var(--face); border:1px solid var(--rule);
+   border-radius:14px; padding:22px;
+   box-shadow:inset 0 1px 0 #ffffff0a, 0 18px 44px -22px #000;
+ }
+ .brand{display:flex;align-items:center;gap:9px;margin-bottom:22px}
+ /* 复用列表页的「实体指示灯」语言做品牌标记，两页看起来是一套东西 */
+ .mark{
+   width:11px;height:11px;border-radius:50%;flex:none;
+   background:radial-gradient(circle at 34% 28%,#ffffffb0,transparent 55%),var(--amber);
+   box-shadow:0 0 0 2px #05080b,0 0 10px 1px #e3a00866;
+ }
+ .brand b{font-size:15px;font-weight:650;letter-spacing:-.01em}
+ label{display:block;font-size:12px;color:var(--dim);margin-bottom:7px}
+ input{
+   width:100%; padding:12px 13px; border-radius:9px; border:1px solid var(--rule);
+   background:#0a0e13; color:var(--text); font:inherit;
+   font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;
+   transition:border-color .15s ease,box-shadow .15s ease;
+ }
+ input::placeholder{color:#4d5866}
+ input:focus-visible{outline:none;border-color:var(--amber);box-shadow:0 0 0 3px #e3a00838}
+ button{
+   width:100%; margin-top:14px; padding:13px; border:0; border-radius:9px;
+   background:var(--amber); color:#1a1200; font:inherit; font-weight:650;
+   cursor:pointer; touch-action:manipulation;
+   transition:background-color .15s ease;
+ }
+ button:hover:not(:disabled){background:#f0ae12}
+ button:active:not(:disabled){transform:translateY(1px)}
+ button:disabled{opacity:.5;cursor:default}
+ button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+ .err{color:var(--dead);font-size:13px;margin:12px 0 0;min-height:1.2em}
+ @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style></head><body>
-<form class="box" id="f" method="POST" action="">
-  <h1>supervisord-center</h1>
-  <p>服务托管中枢 · 需要访问令牌</p>
-  <input type="password" name="token" id="t" placeholder="token" autocomplete="current-password" autofocus>
+<!-- 刻意不自动聚焦：手机上会在加载瞬间弹出键盘盖住半屏。只有一个字段，点一下不碍事。 -->
+<form class="login-wrap" id="f" method="POST" action="">
+  <div class="brand"><span class="mark" aria-hidden="true"></span><b>supervisord-center</b></div>
+  <label for="t">访问令牌</label>
+  <input type="password" name="token" id="t" placeholder="粘贴令牌"
+         autocomplete="current-password" autocapitalize="off" spellcheck="false">
   <button type="submit">进入</button>
-  <div class="err" id="e"></div>
+  <p class="err" id="e" role="alert"></p>
 </form>
 <script>
 // 用 fetch 提交而不是原生表单 POST：这样错误能就地显示，不用跳转。
@@ -660,59 +698,204 @@ document.getElementById('f').addEventListener('submit', async (ev) => {
 
 const PAGE_HTML = `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0f14">
 <title>supervisord-center</title>
 <style>
- :root{color-scheme:dark}
- body{font:15px/1.6 system-ui,"Segoe UI",sans-serif;background:#111417;color:#e6e6e6;margin:0;padding:22px}
- header{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:4px}
- h1{font-size:19px;margin:0}
- .sub{color:#8b949e;font-size:13px}
- .bar{display:flex;gap:10px;align-items:center;margin:14px 0 18px;flex-wrap:wrap}
- button{padding:7px 13px;border-radius:7px;border:1px solid #30363d;background:#21262d;
-        color:#e6e6e6;font-size:13px;cursor:pointer}
- button:hover{background:#2d333b}
- button.primary{background:#238636;border-color:#2ea043}
- button.primary:hover{background:#2ea043}
- button:disabled{opacity:.45;cursor:not-allowed}
- table{width:100%;border-collapse:collapse;font-size:14px}
- th,td{text-align:left;padding:11px 10px;border-bottom:1px solid #21262d;vertical-align:middle}
- th{color:#8b949e;font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
- tr.off{background:#1a1416}
- .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px}
- .on{background:#3fb950;box-shadow:0 0 7px #3fb95088}
- .off2{background:#f85149}
- .name{font-weight:600}
- .port{color:#8b949e;font-variant-numeric:tabular-nums}
- a{color:#58a6ff;text-decoration:none}
- a:hover{text-decoration:underline}
- .acts{display:flex;gap:6px;flex-wrap:wrap}
- .muted{color:#6e7681;font-size:12px}
- .spin{display:inline-block;width:11px;height:11px;border:2px solid #8b949e;
-       border-top-color:transparent;border-radius:50%;animation:s .7s linear infinite;vertical-align:-1px}
+ /* 配色取自机柜/控制台的语汇，不是通用 SaaS 深色主题：
+    底板近黑、面板微亮、琥珀作为唯一的「操作/注意」色。 */
+ :root{
+   color-scheme:dark;
+   --bg:#0b0f14; --face:#121820; --sunken:#0a0e13; --rule:#232c38;
+   --text:#dce3ec; --dim:#7b8798;
+   --live:#3fd07a; --dead:#ff5d5d; --amber:#e3a008;
+   --mono:ui-monospace,"Cascadia Mono",Consolas,monospace;
+ }
+ *{box-sizing:border-box}
+ html{-webkit-text-size-adjust:100%}
+ body{
+   margin:0 auto; max-width:880px; padding:18px;
+   padding-left:max(18px,env(safe-area-inset-left));
+   padding-right:max(18px,env(safe-area-inset-right));
+   padding-bottom:max(18px,env(safe-area-inset-bottom));
+   background:var(--bg); color:var(--text);
+   font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+   -webkit-tap-highlight-color:transparent;
+ }
+
+ /* ── 顶栏：铭牌 + 舰队灯带 ─────────────────────────────────
+    灯带是整个页面的论点：一眼扫完所有服务的状态，不用读任何字。
+    它不重复列表信息，它是「全部」的那个视角。 */
+ header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+ header b{font:650 15px/1 var(--mono);letter-spacing:-.02em}
+ /* 主机名只说一次。列表里就只需要显示路径了。 */
+ .host{font:12px/1 var(--mono);color:var(--dim);min-width:0;
+       overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;max-width:100%}
+ .strip{display:flex;gap:6px;align-items:center}
+ .strip i{width:10px;height:10px;border-radius:50%;flex:none;
+          background:#131a22;box-shadow:0 0 0 1px #2a3440}
+ .count{font:600 13px/1 var(--mono);font-variant-numeric:tabular-nums;color:var(--dim)}
+
+ /* ── 指示灯（签名元素）─────────────────────────────────────
+    照物理指示灯做：内凹底座 + 高光 + 点亮时外溢的辉光。
+    三个状态各自含义不同，且不只靠颜色区分：
+      on   = 端口在听              → 亮绿、实心发光
+      off  = 端口没听（不是故障）  → 不亮、暗芯 + 暗红圈
+      warn = 在听但 HTTP 不健康    → 亮琥珀
+    颜色之外还有形状差异，色觉障碍下也分得清。 */
+ .lamp{
+   width:13px;height:13px;border-radius:50%;flex:none;
+   background:#151c25;box-shadow:inset 0 1px 3px #000c,0 0 0 1px #2a3440;
+   transition:background-color .2s ease,box-shadow .2s ease;
+ }
+ .lamp[data-state="on"]{
+   background:radial-gradient(circle at 34% 28%,#f2fff8,transparent 58%),var(--live);
+   box-shadow:0 0 0 1px #0f4025,0 0 9px 1px #3fd07a99,inset 0 0 3px #ffffffcc;
+ }
+ .lamp[data-state="off"]{
+   background:radial-gradient(circle at 34% 28%,#ffffff26,transparent 58%),#1a1113;
+   box-shadow:0 0 0 1px #4a1d1d,inset 0 1px 3px #000c;
+ }
+ .lamp[data-state="warn"]{
+   background:radial-gradient(circle at 34% 28%,#fffaf0,transparent 58%),var(--amber);
+   box-shadow:0 0 0 1px #4a3405,0 0 9px 1px #e3a00899,inset 0 0 3px #ffffffcc;
+ }
+ .strip i[data-state="on"]{background:var(--live);box-shadow:0 0 6px #3fd07a99}
+ .strip i[data-state="off"]{background:#241417;box-shadow:0 0 0 1px #4a1d1d}
+ .strip i[data-state="warn"]{background:var(--amber);box-shadow:0 0 6px #e3a00899}
+
+ /* ── 提示条 ─────────────────────────────────────────────── */
+ #msg{margin:0 0 12px;font-size:13px;color:var(--dim)}
+ #msg:not(:empty){padding:9px 12px;border-radius:8px;background:#1a212b;border:1px solid var(--rule)}
+ #msg[data-tone="bad"]{color:#ffb4b4;border-color:#4a1d1d;background:#1a1113}
+ #msg[data-tone="good"]{color:#a7e8c4;border-color:#1d4a30;background:#0f1a14}
+
+ /* ── 工具条 ─────────────────────────────────────────────── */
+ .bar{display:flex;gap:8px;align-items:center;margin-bottom:14px}
+ button{
+   padding:9px 13px;border-radius:8px;border:1px solid var(--rule);
+   background:#1a212b;color:var(--text);font:500 13px/1 system-ui,sans-serif;
+   cursor:pointer;touch-action:manipulation;white-space:nowrap;
+   transition:background-color .15s ease,border-color .15s ease;
+ }
+ button:hover:not(:disabled){background:#232c38}
+ button:active:not(:disabled){transform:translateY(1px)}
+ button:disabled{opacity:.38;cursor:default}
+ button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+ button.primary{background:var(--amber);border-color:#b47f06;color:#1a1200;font-weight:650}
+ button.primary:hover:not(:disabled){background:#f0ae12}
+ button.icon{padding:9px 12px;font-size:15px;line-height:1}
+ /* 自动刷新开关：checkbox 本体视觉隐藏，用 span 画开关。
+   label 包着 input，点击区域和控件是同一个，没有死区。 */
+ .tgl{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--dim);
+      cursor:pointer;user-select:none;margin-left:auto}
+ .tgl input{position:absolute;opacity:0;width:0;height:0}
+ .tgl .sw{width:34px;height:19px;border-radius:99px;background:#232c38;position:relative;
+          transition:background-color .18s ease;flex:none}
+ .tgl .sw::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;
+                 border-radius:50%;background:#8b96a5;
+                 transition:transform .18s ease,background-color .18s ease}
+ .tgl input:checked+.sw{background:#1d5c37}
+ .tgl input:checked+.sw::after{transform:translateX(15px);background:var(--live)}
+ .tgl input:focus-visible+.sw{outline:2px solid var(--amber);outline-offset:2px}
+
+ /* ── 服务清单 ───────────────────────────────────────────────
+    同一份 DOM：宽屏排成矩阵，窄屏叠成卡片，靠 grid-template-areas 切换。
+    用 ul/li 而不是 table —— 一旦给 tr/td 套 grid，读屏软件就拿不到表格语义了。 */
+ .panel{border:1px solid var(--rule);border-radius:11px;overflow:hidden;background:var(--face)}
+ .hdr,.row{
+   display:grid;align-items:center;gap:10px;
+   grid-template-columns:13px minmax(120px,1fr) 44px 56px minmax(56px,auto) auto;
+   grid-template-areas:"lamp who port pid path acts";
+ }
+ .hdr{padding:9px 14px;background:var(--sunken);border-bottom:1px solid var(--rule);
+      font-size:11px;color:var(--dim);letter-spacing:.06em;text-transform:uppercase}
+ .hdr .c-who{grid-area:who} .hdr .c-port{grid-area:port;text-align:right}
+ .hdr .c-pid{grid-area:pid;text-align:right} .hdr .c-path{grid-area:path}
+ .hdr .c-acts{grid-area:acts;text-align:right}
+ .rows{list-style:none;margin:0;padding:0}
+ .row{padding:11px 14px;border-bottom:1px solid var(--rule)}
+ .row:last-child{border-bottom:0}
+ .row[data-state="off"]{background:#0e1218}
+ .lamp{grid-area:lamp}
+ .who{grid-area:who;min-width:0;display:flex;align-items:center;gap:7px}
+ /* 名字单行截断：让每行等高，扫读时不跳。完整名字放在 title 里 */
+ .who b{font-weight:600;font-size:14px;min-width:0;overflow:hidden;
+        text-overflow:ellipsis;white-space:nowrap}
+ .tag{font:600 9px/1 var(--mono);letter-spacing:.08em;color:var(--dim);
+      border:1px solid var(--rule);border-radius:4px;padding:3px 4px;flex:none}
+ .tag.bad{color:#ffc9c9;border-color:#5a2323;background:#241315}
+ .num{font:13px/1 var(--mono);font-variant-numeric:tabular-nums;color:var(--dim);
+      white-space:nowrap;text-align:right}
+ .num[data-empty]{opacity:.3}
+ .port{grid-area:port} .pid{grid-area:pid}
+ .path{grid-area:path;font:13px/1 var(--mono);color:#6cb6ff;text-decoration:none;
+       max-width:100%;justify-self:start;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .path:hover{text-decoration:underline}
+ .path.dead{color:var(--dim);cursor:default}
+ .acts{grid-area:acts;display:flex;gap:6px;justify-content:flex-end}
+ .acts button{padding:7px 11px;font-size:12px}
+ .spin{display:inline-block;width:12px;height:12px;border:2px solid var(--dim);
+       border-top-color:transparent;border-radius:50%;animation:s .7s linear infinite}
  @keyframes s{to{transform:rotate(360deg)}}
- #msg{font-size:13px;color:#8b949e;min-height:20px}
+ .empty{padding:26px 14px;text-align:center;color:var(--dim);font-size:13px}
+ /* 首屏点亮：灯从上到下依次亮起，像控制台通电。
+     只做这一次，之后刷新不再重放 —— 每 5 秒闪一次会很烦。 */
+ .boot .row{animation:rise .3s ease backwards}
+ @keyframes rise{from{opacity:0;transform:translateY(4px)}}
+ .vh{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+     clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+ /* ── 窄屏：矩阵塌成卡片，按钮拉满整行给指头 ───────────────── */
+ @media (max-width:640px){
+   body{padding:14px;padding-bottom:max(14px,env(safe-area-inset-bottom))}
+   .hdr{display:none}
+   .row{
+     grid-template-columns:13px 1fr;
+     grid-template-areas:"lamp who" "nums nums" "path path" "acts acts";
+     gap:9px 10px;padding:13px 14px;
+   }
+   .port{grid-area:nums;text-align:left}
+   .pid{grid-area:nums;justify-self:end}
+   /* 表头在窄屏被藏了，用伪元素补回字段名，免得两个数字分不清 */
+   .port::before{content:"端口 ";opacity:.6}
+   .pid::before{content:"PID ";opacity:.6}
+   .acts{justify-content:stretch}
+   .acts button{flex:1;min-height:40px;padding:10px 4px}
+   /* 工具条按钮也拉到 40px：手机上 33px 的按钮点起来发飘 */
+   .bar button{min-height:40px;padding:10px 14px}
+   .bar button.icon{padding:10px 13px}
+   .tgl{margin-left:0}
+   .bar{flex-wrap:wrap}
+ }
+ @media (prefers-reduced-motion:reduce){
+   *{transition:none!important;animation:none!important}
+ }
 </style></head><body>
+<h1 class="vh">服务控制台</h1>
 <header>
-  <h1>supervisord-center</h1>
-  <span class="sub" id="sum">加载中…</span>
+  <b translate="no">supervisord-center</b>
+  <span class="host" id="host" translate="no"></span>
+  <div class="strip" id="strip" aria-hidden="true"></div>
+  <span class="count" id="count" aria-live="polite"></span>
 </header>
+<p id="msg" role="status" aria-live="polite"></p>
 <div class="bar">
-  <button class="primary" id="startAll">全部拉起</button>
-  <button id="refresh">刷新</button>
-  <label class="sub"><input type="checkbox" id="auto" checked> 每 5 秒自动刷新</label>
-  <span id="msg"></span>
+  <button class="primary" id="startAll">全部启动</button>
+  <button class="icon" id="refresh" aria-label="刷新" title="刷新">⟳</button>
+  <label class="tgl"><input type="checkbox" id="auto" checked><span class="sw"></span>自动</label>
 </div>
-<table>
-  <thead><tr>
-    <th>服务</th><th>状态</th><th>端口</th><th>PID</th><th>地址</th><th>操作</th>
-  </tr></thead>
-  <tbody id="tb"></tbody>
-</table>
-<p class="muted" id="foot"></p>
+<main class="panel">
+  <div class="hdr" aria-hidden="true">
+    <span class="c-who">服务</span><span class="c-port">端口</span>
+    <span class="c-pid">PID</span><span class="c-path">地址</span>
+    <span class="c-acts">操作</span>  </div>
+  <ul class="rows" id="rows"></ul>
+</main>
 <script>
 const BASE = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/';
 const $ = (id) => document.getElementById(id);
+let booted = false;
 
 async function api(rel, opts) {
   const r = await fetch(BASE + rel, { credentials: 'same-origin', ...(opts || {}) });
@@ -721,83 +904,137 @@ async function api(rel, opts) {
   try { return JSON.parse(text); } catch { throw new Error('响应不是 JSON：' + text.slice(0, 120)); }
 }
 
-function row(s, busy) {
-  const tr = document.createElement('tr');
-  if (!s.running) tr.className = 'off';
-  const url = s.tailnetUrl
-    ? '<a href="' + s.tailnetUrl + '" target="_blank" rel="noopener">' + s.tailnetUrl + '</a>'
-    : '<span class="muted">' + (s.localUrl || '—') + '</span>';
-  tr.innerHTML =
-    '<td><span class="name">' + s.name + '</span>' +
-      (s.autostart ? ' <span class="muted">自启</span>' : '') +
-      (s.note ? '<div class="muted">' + s.note + '</div>' : '') + '</td>' +
-    '<td><span class="dot ' + (s.running ? 'on' : 'off2') + '"></span>' +
-      (s.running ? '在线' : '离线') +
-      (s.http && s.http.status && !s.http.ok ? ' <span class="muted">HTTP ' + s.http.status + '</span>' : '') + '</td>' +
-    '<td class="port">' + (s.port || '—') + '</td>' +
-    '<td class="port">' + (s.pid || '—') + '</td>' +
-    '<td>' + url + '</td>' +
-    '<td><div class="acts">' +
-      (busy
-        ? '<span class="spin"></span><span class="muted">处理中…</span>'
-        : '<button data-act="start" data-id="' + s.id + '"' + (s.running ? ' disabled' : '') + '>启动</button>' +
-          '<button data-act="restart" data-id="' + s.id + '">重启</button>' +
-          '<button data-act="stop" data-id="' + s.id + '"' + (s.running ? '' : ' disabled') + '>停止</button>') +
-    '</div></td>';
-  return tr;
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) =>
+    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// 灯的状态：在线但 HTTP 探针不健康 → warn，其余按 running 二选一。
+// 「离线」不是故障，只是没开，所以不点亮、也不喊。
+function lampState(s) {
+  if (!s.running) return 'off';
+  if (s.http && s.http.status && !s.http.ok) return 'warn';
+  return 'on';
+}
+const STATE_TEXT = { on: '在线', off: '离线', warn: '在线但 HTTP 异常' };
+
+function rowHtml(s, busy, idx) {
+  const st = lampState(s);
+  const full = s.tailnetUrl || s.localUrl || '';
+  // 只显示路径：每一行都重复同一个主机名纯属噪音，主机名在标题里说明一次就够了。
+  // 完整地址放进 title 和 href，悬停或点开都能拿到。（绕开正则，避免反斜杠）
+  let label = full;
+  if (s.tailnetUrl) {
+    const i = s.tailnetUrl.indexOf('//');
+    const j = i < 0 ? -1 : s.tailnetUrl.indexOf('/', i + 2);
+    label = j < 0 ? '/' : s.tailnetUrl.slice(j);
+  }
+  const href = s.tailnetUrl
+    ? '<a class="path" href="' + esc(s.tailnetUrl) + '" target="_blank" rel="noopener" title="' + esc(s.tailnetUrl) + '">' + esc(label) + '</a>'
+    : '<span class="path dead" title="' + esc(full) + '">' + esc(label || '—') + '</span>';
+  // HTTP 状态只在**不正常**时才显示。健康的 200 是废话，而且会把行高挤乱。
+  const warn = (st === 'warn' && s.http && s.http.status)
+    ? '<span class="tag bad">HTTP ' + esc(s.http.status) + '</span>' : '';
+  const acts = busy
+    ? '<span class="spin" role="img" aria-label="处理中"></span>'
+    : '<button data-act="start" data-id="' + esc(s.id) + '"' + (s.running ? ' disabled' : '') + '>启动</button>' +
+      '<button data-act="restart" data-id="' + esc(s.id) + '">重启</button>' +
+      '<button data-act="stop" data-id="' + esc(s.id) + '"' + (s.running ? '' : ' disabled') + '>停止</button>';
+  return '<li class="row" data-state="' + st + '"' + (booted ? '' : ' style="animation-delay:' + Math.min(idx * 45, 360) + 'ms"') + '>' +
+    '<span class="lamp" data-state="' + st + '" role="img" aria-label="' + STATE_TEXT[st] + '" title="' + STATE_TEXT[st] + '"></span>' +
+    '<span class="who"><b title="' + esc(s.name) + '">' + esc(s.name) + '</b>' +
+      (s.autostart ? '<span class="tag">自启</span>' : '') + warn + '</span>' +
+    '<span class="num port"' + (s.port ? '' : ' data-empty') + ' aria-label="端口 ' + esc(s.port || '无') + '">' + esc(s.port || '—') + '</span>' +
+    '<span class="num pid"' + (s.pid ? '' : ' data-empty') + ' aria-label="进程号 ' + esc(s.pid || '无') + '">' + esc(s.pid || '—') + '</span>' +
+    href +
+    '<span class="acts">' + acts + '</span></li>';
 }
 
 let busy = {};
 let services = [];
 
 function render() {
-  const tb = $('tb');
-  tb.textContent = '';
-  for (const s of services) tb.appendChild(row(s, !!busy[s.id]));
+  const rows = $('rows');
+  if (!services.length) {
+    rows.innerHTML = '<li class="empty">没有配置任何服务</li>';
+  } else {
+    rows.innerHTML = services.map((s, i) => rowHtml(s, !!busy[s.id], i)).join('');
+  }
+  // 舰队灯带：和列表同源，只是压缩成一行
+  $('strip').innerHTML = services.map((s) =>
+    '<i data-state="' + lampState(s) + '"></i>').join('');
   const on = services.filter((s) => s.running).length;
-  $('sum').textContent = on + ' / ' + services.length + ' 在线';
+  $('count').textContent = on + '/' + services.length;
+  $('count').setAttribute('aria-label', services.length + ' 个服务，' + on + ' 个在线');
+  // 首屏点亮动画只放一次，之后每 5 秒的刷新不再重放
+  if (!booted && services.length) {
+    document.querySelector('.panel').classList.add('boot');
+    booted = true;
+    setTimeout(() => document.querySelector('.panel').classList.remove('boot'), 1200);
+  }
+}
+
+function say(text, tone) {
+  const m = $('msg');
+  m.textContent = text || '';
+  if (tone) m.setAttribute('data-tone', tone); else m.removeAttribute('data-tone');
 }
 
 async function load() {
   const data = await api('services');
   services = data.services || [];
   render();
-  $('foot').textContent = '控制面 ' + (data.centerPort || '') + ' · 运行 ' +
-    Math.round(data.uptimeSec || 0) + ' 秒 · 配置 ' + (data.configPath || '');
+  // 主机名从第一条 tailnetUrl 里取，取不到就不显示
+  const first = services.find((s) => s.tailnetUrl);
+  const host = $('host');
+  if (first) {
+    const u = first.tailnetUrl;
+    const i = u.indexOf('//');
+    const j = i < 0 ? -1 : u.indexOf('/', i + 2);
+    host.textContent = j < 0 ? u.slice(i + 2) : u.slice(i + 2, j);
+  } else {
+    host.textContent = '';
+  }
 }
 
 async function act(id, what) {
-  busy[id] = true; render();
-  $('msg').textContent = '';
+  busy[id] = true; render(); say('');
   try {
     const r = await api('services/' + encodeURIComponent(id) + '/' + what, { method: 'POST' });
-    if (r.ok === false) $('msg').textContent = what + ' ' + id + ' 失败：' + (r.message || r.error || '未知');
-    else if (what === 'start' && r.alreadyRunning) $('msg').textContent = id + ' 本来就在运行';
-    else if (what === 'start' && r.listening === false) $('msg').textContent = id + ' 已拉起但端口还没就绪，稍后刷新看看';
-    else if (r.stillRunning) $('msg').textContent = id + ' 停止后仍在监听（自愈包装器可能把它拉回来了）';
+    // 失败要说清楚「哪个 + 为什么」，只报「失败」等于没说
+    if (r.ok === false) say(id + ' ' + what + ' 失败：' + (r.message || r.error || '未知'), 'bad');
+    else if (what === 'start' && r.alreadyRunning) say(id + ' 本来就在运行');
+    else if (what === 'start' && r.listening === false) say(id + ' 已拉起，端口还没就绪', 'bad');
+    else if (r.stillRunning) say(id + ' 停止后仍在监听（自愈包装器可能又拉起来了）', 'bad');
+    else say(id + ' ' + ({ start: '已启动', restart: '已重启', stop: '已停止' }[what] || what), 'good');
   } catch (e) {
-    $('msg').textContent = '失败：' + e.message;
+    say('失败：' + e.message, 'bad');
   } finally {
     delete busy[id]; render();
     if (auto.checked) setTimeout(() => load().catch(() => {}), 400);
   }
 }
 
-$('tb').addEventListener('click', (ev) => {
+$('rows').addEventListener('click', (ev) => {
   const b = ev.target.closest('button[data-act]');
   if (b) act(b.dataset.id, b.dataset.act);
 });
-$('refresh').addEventListener('click', () => load().catch((e) => { $('msg').textContent = e.message; }));
+$('refresh').addEventListener('click', () => { say(''); load().catch((e) => say(e.message, 'bad')); });
 $('startAll').addEventListener('click', async () => {
-  // 只拉离线的。全量启动会对着已经在跑的服务发一堆幂等请求，纯属噪音。
-  for (const s of services.filter((x) => !x.running)) await act(s.id, 'start');
+  // 只拉离线的：对已在跑的服务发一堆幂等请求纯属噪音
+  const down = services.filter((x) => !x.running);
+  if (!down.length) { say('全部在线'); return; }
+  $('startAll').disabled = true;
+  try { for (const s of down) await act(s.id, 'start'); }
+  finally { $('startAll').disabled = false; }
   load().catch(() => {});
 });
 const auto = $('auto');
-let timer = setInterval(tick, 5000);
-function tick() { if (auto.checked && !Object.keys(busy).length) load().catch(() => {}); }
+setInterval(() => {
+  if (auto.checked && !Object.keys(busy).length) load().catch(() => {});
+}, 5000);
 auto.addEventListener('change', () => { if (auto.checked) load().catch(() => {}); });
-load().catch((e) => { $('msg').textContent = e.message; });
+load().catch((e) => say(e.message, 'bad'));
 </script></body></html>`;
 
 // ── HTTP ────────────────────────────────────────────────────────────────

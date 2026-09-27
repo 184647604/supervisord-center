@@ -13,6 +13,18 @@ _archive-*/
 *.bak
 *~
 
+# 页面编辑中转文件。
+#
+# 页面**唯一真相是 src/supervisord-center.js 里的 PAGE_HTML**。
+# _newpage.html 只是用 tools/splice-page.js extract 拆出来、方便用 HTML 工具
+# 编辑的中转副本。它**不入库** —— 否则仓库里会有两份页面，改了一份忘了同步，
+# 就会出现「代码里是新的、跑起来是旧的」这种最难查的问题。
+# 这个项目已经在配置上吃过一次「第二份真相」的亏（见 README §13）。
+src/_newpage.html
+
+# 界面截图（本地验证用）
+_shots/
+
 # Node（本项目零依赖，但以防万一）
 node_modules/
 package-lock.json

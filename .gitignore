@@ -1,0 +1,18 @@
+# 真实配置含明文 token —— 绝不入库（README §12）
+config/supervisord-center.config.json
+
+# 运行时产物
+logs/
+*.log
+
+# 迁移归档（可能含旧 token）
+_archive-*/
+
+# 临时
+*.tmp
+*.bak
+*~
+
+# Node（本项目零依赖，但以防万一）
+node_modules/
+package-lock.json

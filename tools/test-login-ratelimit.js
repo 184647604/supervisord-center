@@ -20,7 +20,11 @@ const path = require('node:path');
 
 const ROOT = path.join(os.tmpdir(), 'sdc-rl-' + process.pid);
 const PORT = 3095;
-const TOKEN = 'REDACTED-TOKEN';
+// 测试自己的假令牌 —— 这里**绝不能**填真实令牌。
+// 本脚本自起一个隔离实例并把这个值写进它的临时配置，测试完全不碰生产配置。
+// 早先这里写的是真实生产令牌，结果它随代码进了版本库 ——
+// 而那个令牌同时还是 workbuddy / doubao 的 ADMIN_KEY。
+const TOKEN = process.env.SDC_TEST_TOKEN || 'test-token-not-a-real-credential';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -85,8 +89,9 @@ function check(name, pass, detail) {
   check('请求头带新 token -> 200', hdr.status === 200, 'status=' + hdr.status);
   const bearer = await get('/health', { authorization: 'Bearer ' + TOKEN });
   check('Bearer 带新 token -> 200', bearer.status === 200, 'status=' + bearer.status);
-  const wrongHdr = await get('/health', { 'x-supervisord-center-token': '18774779648' });
-  check('错一位的 token -> 401', wrongHdr.status === 401, 'status=' + wrongHdr.status);
+  // 错令牌从 TOKEN 派生，避免又硬编码一个「真令牌 ±1」——那样等于泄漏真令牌
+  const wrongHdr = await get('/health', { 'x-supervisord-center-token': TOKEN + 'x' });
+  check('错误的 token -> 401', wrongHdr.status === 401, 'status=' + wrongHdr.status);
 
   console.log('\n--- 2) 失败到阈值后被限流 ---');
   const codes = [];

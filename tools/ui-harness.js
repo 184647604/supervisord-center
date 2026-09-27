@@ -14,7 +14,8 @@ const path = require('node:path');
 
 const ROOT = path.join(os.tmpdir(), 'sdc-ui');
 const PORT = 3091;
-const TOKEN = 'REDACTED-TOKEN';
+// 试验台自己的假令牌 —— 这里**绝不能**填真实令牌（会随代码进版本库）。
+const TOKEN = process.env.SDC_UI_TOKEN || 'ui-harness-local-only';
 const PIDFILE = path.join(ROOT, 'pids.json');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -78,7 +79,8 @@ async function start() {
     host: '127.0.0.1',
     token: TOKEN,
     log: path.join(ROOT, 'ui.log'),
-    tailnetBase: 'https://YOUR-NODE.YOUR-TAILNET.ts.net',
+    // 假主机名 —— 试验台不连 tailnet，这里只是让页面有东西可显示
+    tailnetBase: 'https://demo-node.example-tailnet.ts.net',
     startWaitMs: 4000,
     services: [
       { id: 'alpha', name: 'Alpha 服务', port: 8097, via: 'node', node: process.execPath,

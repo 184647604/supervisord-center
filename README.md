@@ -204,7 +204,6 @@ Missing closing '}' in statement block or type definition.
 | `x-dsh-supervisor-token` | `x-supervisord-center-token`（同时接受 `Authorization: Bearer`） |
 | 计划任务 `dsh-supervisor` | `supervisord-center` |
 | `install-supervisor.ps1` | `install.ps1` |
-| `install-supervisor.ps1` | `install.ps1` |
 
 **端口 3099 与路径 `/super` 刻意不变** —— 它们是 Tailscale serve 映射和手机 App
 的既有约定，改了要动多处配置，收益为零。
@@ -252,7 +251,7 @@ supervisor 的地址和 token 拿到并缓存备用。失效后 App 拿不到这
 
 ## 11. 路线图
 
-- [x] **第一步：建项目 + 改名**（本次完成）
+- [x] **第一步：建项目 + 改名**（本次完成，已端到端验证，见 §14）
 - [ ] **第二步：多服务化** —— 现在配置里的 `dsh` 段是**单服务**的，只支持托管一个。
       改造方向：`services: [{id, name, cmd, args, cwd, port, autostart}]`，
       路由改成 `/services/:id/{start,stop,restart}`，并加 Web 管理页。
@@ -271,15 +270,49 @@ supervisor 的地址和 token 拿到并缓存备用。失效后 App 拿不到这
 所以多服务化必须先设计**每个服务的 stop 策略**：走 `.cmd` 还是绕过它直连真实进程、
 要不要先停掉自愈循环、要不要按进程树 kill。
 
-## 12. 安全
+## 12. 验证记录
+
+改造完成后逐项实测过。**真实 `/restart` 是刻意绕开 DSH 测的** —— 它会杀掉 DSH，
+而 DSH 正是执行测试的这个会话的宿主，所以用 `tools/dummy-target.js` 当靶子。
+
+| 项目 | 方法 | 结果 |
+|---|---|---|
+| 语法 | `node --check` | ✅ 通过 |
+| 安装脚本编码 | 统计非 ASCII 字节 | ✅ 0 个（纯 ASCII） |
+| 安装脚本语法 | `Parser::ParseFile` | ✅ 无解析错误 |
+| **WMI 脱离 Job** | 查新建进程的父进程 | ✅ 父 = `WmiPrvSE.exe`，非 dsh |
+| 存活探测 | 假目标（8001，无人监听） | ✅ `running:false` 正确 |
+| 鉴权（无 token） | 不带请求头请求 | ✅ 401 |
+| 鉴权（`?token=`） | 明确拒绝 query 传参 | ✅ 401 |
+| 鉴权（新请求头） | `x-supervisord-center-token` | ✅ 200 |
+| 鉴权（Bearer） | `Authorization: Bearer` | ✅ 200 |
+| 鉴权（旧请求头） | `x-dsh-supervisor-token` | ✅ 401（证明改名生效） |
+| tailnet 端到端 | `https://…ts.net/super/health` | ✅ 200 |
+| `/start` 幂等 | DSH 已在跑时调用 | ✅ `alreadyRunning:true`，DSH pid 未变（13512） |
+| **`/restart`** | 用假目标测完整链路 | ✅ 靶子换新进程（24524→23844） |
+| **无自杀 bug** | `/restart` 后查控制面自身 | ✅ 存活，`uptime` 连续，未触发 `kill(0)` |
+| DryRun 零副作用 | 查运行时目录 / 端口 / TEMP | ✅ 三者皆无残留 |
+| 迁移 | 真实从 dsh-supervisor 迁 | ✅ 旧进程停、旧任务注销、旧目录归档、新实例 WMI 起、token 沿用 |
+| token 沿用 | 首次迁移（新配置不存在） | ✅ 从**旧路径**取到（32 位） |
+
+**全程未触碰正在跑的 DSH web（pid 13512）**，除 `/start` 幂等测试确认它未被重启。
+
+### 测试夹具
+
+```powershell
+# tools/dummy-target.js 是个只回一行字的极小 HTTP 服务，
+# 用来在**不碰真实 DSH** 的前提下验证 start/restart 全链路。
+node tools/dummy-target.js 8099
+```
+
+## 13. 安全
 
 | 暴露面 | 现状 | 风险 |
-|---|---|---|
 | `3099` 控制面 | 需 token（明文存在配置里），经 `/super` 暴露给 **tailnet** | 拿到 token 的设备可**启动/重启**你的 DSH。不是公网，但 tailnet 内任何拿到 token 的设备都能用 |
 | 监听地址 | **恒为 `127.0.0.1`** | 不对外网卡暴露。不要改成 `0.0.0.0`：本机用户不是管理员，Windows 防火墙会拦截，而且外网可达性已交给 Tailscale |
 | 配置文件 | 含明文 token | **按凭据对待**，不要进版本库（`.gitignore` 已排除） |
 
-## 13. 文件
+## 14. 文件
 
 ```
 supervisord-center/
@@ -287,8 +320,11 @@ supervisord-center/
 ├── config/cfg.template.json        # 配置模板（含字段说明）
 ├── config/supervisord-center.config.json  # 真实配置，含 token，不入库
 ├── install.ps1                     # 安装 / 迁移（纯 ASCII）
+├── tools/dummy-target.js           # 测试用假服务（验证 start/restart 用）
 ├── _history/                       # 改造前的旧版本，仅存档
-│   └── review-dsh-supervisor.js
+│   ├── dsh-supervisor.released-v1.js
+│   ├── review-dsh-supervisor.js
+│   └── install-supervisor.ps1
 ├── docs/
 ├── logs/
 ├── .gitignore
@@ -299,6 +335,16 @@ supervisord-center/
 （221 行，端口 3081）。它保留了后来被修掉的几个 bug，有考古价值：
 不剥 BOM、`process.kill(launchedPid || 0)` 的自杀路径、允许 `?token=`。
 **不要运行它**，只作参考。
+
+`tools/dummy-target.js` 是测试夹具：一个只回一行字的极小 HTTP 服务。
+用途是在**不碰真实 DSH** 的前提下验证 `/start` 与 `/restart` 的完整链路
+（起进程 → 探活 → kill → 再起）。真实 restart 会杀掉 DSH，而 DSH 正是本会话
+的宿主 —— 所以这条路径必须用假目标测：
+
+```powershell
+# 起一个指向假服务的独立实例（端口 3096），然后打它的 /start 和 /restart
+node tools/dummy-target.js 8099   # 手动起假服务看看
+```
 
 ## License
 

@@ -2,17 +2,16 @@
   supervisord-center - installer / migration script
 
   -- WHY THIS FILE IS ASCII-ONLY ------------------------------------------
-  Same reason workbuddy-api.cmd and traework-api.cmd in this ecosystem are
-  ASCII-only: Windows PowerShell 5.1 decodes a .ps1 file WITHOUT a UTF-8 BOM
-  using the system ANSI codepage (gb2312 on this machine). Any non-ASCII text
-  is then mangled, and mangled bytes can swallow a closing quote - producing
-  a cascade of bogus "Missing closing '}'" parse errors at unrelated lines.
+  Windows PowerShell 5.1 decodes a .ps1 file WITHOUT a UTF-8 BOM using the
+  system ANSI codepage. Any non-ASCII text is then mangled, and mangled bytes
+  can swallow a closing quote - producing a cascade of bogus "Missing closing
+  '}'" parse errors at unrelated lines.
 
-  The previous dsh-supervisor installer had a UTF-8 BOM, which is why it
-  could contain Chinese. But a BOM is silently stripped by many editors and
-  tooling (it was stripped twice while writing this very file), so depending
-  on it is fragile. ASCII-only removes the entire failure class, works on
-  PS 5.1 and PS 7 alike, and needs no encoding discipline from future editors.
+  A UTF-8 BOM would let the file contain Chinese, but a BOM is silently
+  stripped by many editors and tooling (it was stripped twice while writing
+  this very file), so depending on it is fragile. ASCII-only removes the
+  entire failure class, works on both PS 5.1 and PS 7, and asks nothing of
+  whoever edits this next.
 
   All Chinese notes live in README.md, which nothing parses as a script.
 
@@ -20,31 +19,33 @@
    1) Resolve paths, check sources, locate node
    2) Create runtime dir + config (REUSES the existing token by default)
    3) Syntax check (node --check)
-   4) Migrate: stop old dsh-supervisor, unregister its scheduled task, archive
-   5) Start via WMI (escapes the dsh Job Object) + register logon autostart
+   4) Migrate, if an older dsh-supervisor install is present: stop it,
+      unregister its scheduled task, archive its directory
+   5) Start via WMI (so the process outlives anything that launched it)
+      + register a logon autostart task
    6) Health probe
 
   -- USAGE ----------------------------------------------------------------
     .\install.ps1 -DryRun     # safe trial on spare port 3098, touches nothing
     .\install.ps1             # real install / migration (keeps existing config)
     .\install.ps1 -Force      # overwrite locally-modified runtime files
-    .\install.ps1 -NewToken   # rotate the token (breaks cached phone tokens)
+    .\install.ps1 -NewToken   # rotate the token (breaks cached client tokens)
     .\install.ps1 -RegenerateConfig   # rebuild config from the template
 #>
 [CmdletBinding()]
 param(
   # Safe trial: start a throwaway instance on a spare port, then stop it.
-  # Never touches the running service, the scheduled task, or port 3099.
+  # Never touches the running service, the scheduled task, or the real port.
   [switch]$DryRun,
   # Overwrite runtime files that differ from the project source.
   [switch]$Force,
-  # Rotate the token instead of reusing it. Breaks any cached phone token.
+  # Rotate the token instead of reusing it. Breaks any cached client token.
   [switch]$NewToken,
   # Rebuild the live config from config/cfg.template.json. Off by default:
   # the template holds GENERIC paths, so applying it would replace this
   # machine's real service paths with placeholders and nothing would start.
   [switch]$RegenerateConfig,
-  # Runtime directory (the deployment copy, independent of dsh).
+  # Runtime directory (the deployment copy, independent of any managed service).
   [string]$RuntimeDir = "$env:USERPROFILE\.supervisord-center",
   # Spare port used by -DryRun.
   [int]$DryRunPort = 3098
@@ -437,13 +438,19 @@ if ($oldTask) {
 } else { Ok 'no old scheduled task to clean up' }
 
 # Archive (never delete) the old runtime dir so rollback stays possible.
+#
+# This only fires for installs migrating from the older "dsh-supervisor"
+# layout. A fresh install has no such directory and skips the whole block,
+# including the coupling warning at the end.
 $OldDir = "$env:USERPROFILE\.dsh\supervisor"
+$MigratedFromLegacy = $false
 if (Test-Path $OldDir) {
   $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
   $Archive = Join-Path $RuntimeDir "_archive-dsh-supervisor-$stamp"
   New-Item -ItemType Directory -Force -Path $Archive | Out-Null
   Copy-Item "$OldDir\*" -Destination $Archive -Recurse -Force -ErrorAction SilentlyContinue
   Ok "old files archived to $Archive (original dir left in place)"
+  $MigratedFromLegacy = $true
 }
 
 # ---------------------------------------------------------------------------
@@ -509,13 +516,20 @@ try {
 Head 'Done'
 Say ''
 Say "  local control plane : http://127.0.0.1:$($p.port)"
-Say "  tailnet             : https://<your-node>.ts.net/super  (existing mapping, unchanged)"
+Say "  dashboard           : http://127.0.0.1:$($p.port)/   (paste the token)"
 Say "  token               : $Token"
 Say ''
-Say '  Next steps (the Tailscale mapping is unchanged, so usually nothing to do):'
+Say '  To reach it from another device, map it through your tunnel, e.g.:'
 Say "    tailscale serve --bg --https=443 --set-path=/super http://127.0.0.1:$($p.port)"
 Say '    tailscale serve status'
-Say ''
-Say '  WARNING: dsh-plugin-center hardcodes the OLD config path in its'
-Say '  center.supervisor endpoint (~/.dsh/supervisor/dsh-supervisor.config.json).'
-Say '  That endpoint breaks after the rename. See README section "Known coupling".'
+
+# This warning is only meaningful for installs that actually came from the
+# older dsh-supervisor layout - a fresh user has never heard of that plugin,
+# and printing it unconditionally would just be noise.
+if ($MigratedFromLegacy) {
+  Say ''
+  Say '  NOTE: if you use the dsh-plugin-center plugin, its center.supervisor'
+  Say '  endpoint hardcodes the OLD config path (~/.dsh/supervisor/...) and will'
+  Say '  report installed:false after this migration. The endpoint is read-only'
+  Say '  and affects nothing else. See the README for the fix.'
+}

@@ -20,13 +20,12 @@
  *  **连包装器一起杀**（见 killService），而不是指望服务乖乖待着不动。
  *
  * ── 从 dsh-supervisor 继承的硬约束（全是实测踩出来的，别删）──────────────
- *  1. 只监听 127.0.0.1。Windows 防火墙规则改动要管理员，而本机用户不是管理员。
- *     外网可达性交给 tailscale serve（跑在 Tailscale 服务里，本来就有权限）：
+ *  1. 只监听 127.0.0.1。Windows 防火墙规则改动要管理员，而普通用户不是管理员。
+ *     外网可达性交给隧道（tailscale serve 跑在服务账号里，本来就有权限）：
  *       tailscale serve --bg --https=443 --set-path=/super http://127.0.0.1:3099
- *     实测非管理员可执行，且不影响原有的 / 到 3080 的映射。
- *  2. 不能由被托管的 dsh 工具子进程直接 spawn。dsh 用 Windows Job Object 并在
- *     关闭时连带杀子进程，detached:true 也逃不掉（DETACHED_PROCESS 不解除 Job
- *     成员身份）。必须经 WMI（Win32_Process.Create）创建，父进程变成
+ *  2. 不能由任何会被回收的父进程直接 spawn。上层若用 Windows Job Object 管理
+ *     子进程并在关闭时连带清理，detached:true 也逃不掉（DETACHED_PROCESS 不解除
+ *     Job 成员身份）。必须经 WMI（Win32_Process.Create）创建，父进程变成
  *     WmiPrvSE.exe，在 Job 之外。install 脚本负责这件事。
  *  3. 判断被托管服务死活只用 TCP 探测，不用 PID 记账 —— PID 会因重启失效，
  *     而端口有人监听是唯一可靠的存活信号。
@@ -63,9 +62,9 @@ const { spawn, execFileSync } = require('node:child_process');
 
 // 运行时目录：~/.supervisord-center
 //
-// 刻意**不放在 ~/.dsh 下**。这是「完全独立」的一部分：本进程托管 dsh web，
-// 但它的生命周期、配置、日志都不该跟 dsh 的目录纠缠 —— dsh 被卸载/重装/
-// 换 HOME 都不该影响这里，反过来也一样。
+// 刻意**不放在任何被托管服务的目录下**。这是「完全独立」的一部分：本进程托管
+// 别的服务，但它自己的生命周期、配置、日志都不该跟那些服务的目录纠缠 ——
+// 对方被卸载/重装/换 HOME 都不该影响这里，反过来也一样。
 const RUNTIME_DIR = process.env.SUPERVISORD_CENTER_HOME ||
   path.join(os.homedir(), '.supervisord-center');
 
@@ -110,8 +109,8 @@ const PORT = Number(config.port || 3099);
 const HOST = config.host || '127.0.0.1';
 const TOKEN = String(config.token || '');
 const LOG = config.log || path.join(RUNTIME_DIR, 'logs', 'center.log');
-// 启动后等端口就绪的上限。dsh 冷启动要十几秒，别的服务几秒就够，
-// 用同一个上限是为了避免「每个服务一个魔数」。
+// 启动后等端口就绪的上限。冷启动慢的服务（首次加载、建索引）要十几秒，
+// 快的一两秒就够。用同一个上限是为了避免「每个服务一个魔数」。
 const START_WAIT_MS = Number(config.startWaitMs || 25000);
 // tailnet 根地址，只用于在管理页上拼出可点的链接（纯粹是显示用途）。
 const TAILNET_BASE = String(config.tailnetBase || '').replace(/\/+$/, '');
@@ -363,8 +362,8 @@ function spawnService(svc) {
     let child;
     try {
       child = spawn(file, argv, {
-        // 显式传 cwd：否则被托管服务会以本进程的目录为工作区（实测过，dsh 的
-        // workspaceRoot 取自 process.cwd()，传错会导致工作区跑到 supervisor 目录）。
+        // 显式传 cwd：否则被托管服务会以本进程的目录为工作区（实测过：某些
+        // 服务的工作区取自 process.cwd()，传错会导致它的数据落到 supervisor 目录）。
         cwd: svc.cwd || os.homedir(),
         detached: true,
         stdio: 'ignore',
@@ -541,13 +540,13 @@ function authorized(req) {
 // ── 登录限流 ────────────────────────────────────────────────────────────
 //
 // 为什么需要：token 是可配置的，一旦选成人能记住的短串（例如纯数字手机号），
-// 搜索空间就比 32 位随机串小几个数量级，而登录接口本身没有任何节流。
-// workbuddy 和 doubao 的控制台都做了「10 分钟 8 次」限流，这里照同一个约定。
+// 搜索空间就比随机串小几个数量级，而登录接口本身没有任何节流。
+// 阈值取「10 分钟 8 次」是为了跟同类管理台保持一致的直觉。
 //
-// 按来源 IP 分桶。**实测：经 tailscale serve 进来的请求 remoteAddress 全是
-// 127.0.0.1**（serve 从本机回环转发），所以实际只有一个桶 —— 也就是全局限流。
+// 按来源 IP 分桶。**实测：经反向代理进来的请求 remoteAddress 全是
+// 127.0.0.1**（代理从本机回环转发），所以实际只有一个桶 —— 也就是全局限流。
 // 这对本工具是**想要**的行为：单用户，攻击者没法靠换源 IP 绕过。
-// 但代码仍按 IP 分桶而不是写死全局，这样直连（不经 serve）时语义依然正确。
+// 但代码仍按 IP 分桶而不是写死全局，这样直连（不经代理）时语义依然正确。
 //
 // 代价要说清楚：全局桶意味着攻击者可以把桶打满，让**你自己**暂时登不进去。
 // 这是有意的取舍 —— 短暂登不上，好过被无限次猜测。成功登录会清空计数，
@@ -597,7 +596,7 @@ function readBody(req, limit = 8192) {
 // 再转发（实测：/super/nonexistent 拿到的是本进程的 404 JSON），所以服务端只看到
 // '/'，不知道自己挂在哪个前缀下。浏览器侧的 relative 解析又依赖末尾斜杠 ——
 // 访问 /super（无斜杠）时，fetch('services') 会解析到 https://host/services，
-// 打到 DSH 上去。所以页面用 JS 从 location.pathname 反推 base 并补上斜杠，
+// 打到**别的服务**上去。所以页面用 JS 从 location.pathname 反推 base 并补上斜杠，
 // 让 /super 和 /super/ 两种访问方式都对。
 const LOGIN_HTML = `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
@@ -1078,10 +1077,9 @@ const server = http.createServer(async (req, res) => {
     }
     loginFails.delete(ip); // 成功即清空，避免正常使用累积到被锁
     // HttpOnly：页面脚本读不到它，XSS 也偷不走。
-    // SameSite=Lax：够用且不影响 tailnet 上的正常导航。
-    // 不设 Secure：Tailscale 侧是 HTTPS，但 loopback 直连是 HTTP，设了会让
-    // http://127.0.0.1:3099 的本地登录失效（和 workbuddy 的 ADMIN_INSECURE_COOKIE
-    // 是同一个权衡）。
+    // SameSite=Lax：够用且不影响经代理的正常导航。
+    // 不设 Secure：反向代理侧可能是 HTTPS，但 loopback 直连是 HTTP，设了会让
+    // http://127.0.0.1:<port> 的本地登录失效。若你只经 HTTPS 访问，可以打开它。
     res.writeHead(204, {
       'set-cookie': 'sdc_session=' + sessionValue() + '; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000',
       'cache-control': 'no-store',

@@ -11,7 +11,7 @@
 |---|---|---|
 | `dsh-supervisor.released-v1.js` | 发布版（GitHub Release `supervisor-v1` 的资产，11940 bytes） | 与 release 资产 SHA256 逐字节一致 |
 | `review-dsh-supervisor.js` | **更早的版本**（221 行，端口 3081） | 见下 |
-| `install-supervisor.ps1` | 旧安装脚本（从 GitHub Release 下载产物） | 带 UTF-8 BOM，中文可读；新版改为纯 ASCII，理由见 README §7 |
+| `install-supervisor.ps1` | 旧安装脚本（从 GitHub Release 下载产物） | 带 UTF-8 BOM，中文可读；新版改为纯 ASCII，理由见主 README 的「脚本一律纯 ASCII」 |
 
 ## `review-dsh-supervisor.js` 的考古价值
 

@@ -112,18 +112,32 @@ $RuntimeCfg = Join-Path $RuntimeDir 'supervisord-center.config.json'
 # address + token while dsh is still alive (it has nowhere else to ask once
 # dsh is dead). Rotating on every reinstall would silently invalidate that
 # cache exactly when it is needed most. Rotate only on explicit -NewToken.
+#
+# Check the NEW path first, then the LEGACY dsh-supervisor path. The legacy
+# check is what makes the very first migration preserve the token: at that
+# moment the new config does not exist yet and the token only lives in
+# ~/.dsh/supervisor/dsh-supervisor.config.json. Without it, migrating would
+# silently mint a fresh token and break every cached phone credential.
 $Token = $null
-if (-not $NewToken -and (Test-Path $RuntimeCfg)) {
+$TokenSources = @(
+  $RuntimeCfg,
+  (Join-Path $env:USERPROFILE '.dsh\supervisor\dsh-supervisor.config.json')
+)
+foreach ($src in $TokenSources) {
+  if ($NewToken) { break }
+  if (-not (Test-Path $src)) { continue }
   try {
     # TrimStart, not .Replace([char]0xFEFF, ''): Replace(char,char) requires a
     # char, and an empty string throws "String must be exactly one character
     # long" (hit this during testing).
-    $old = ((Get-Content $RuntimeCfg -Raw -Encoding UTF8).TrimStart([char]0xFEFF)) | ConvertFrom-Json
+    $old = ((Get-Content $src -Raw -Encoding UTF8).TrimStart([char]0xFEFF)) | ConvertFrom-Json
     if ($old.token -and $old.token -ne '__TOKEN__') {
       $Token = $old.token
-      Ok "reusing existing token (length $($Token.Length))"
+      $isLegacy = $src -eq $TokenSources[1]
+      Ok "reusing existing token from $(if ($isLegacy) { 'LEGACY dsh-supervisor config' } else { 'existing config' }) (length $($Token.Length))"
+      break
     }
-  } catch { Warn "old config unreadable, generating a new token: $($_.Exception.Message)" }
+  } catch { Warn "config unreadable at $src : $($_.Exception.Message)" }
 }
 if (-not $Token) {
   $bytes = New-Object 'byte[]' 32

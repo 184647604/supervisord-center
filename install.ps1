@@ -26,9 +26,10 @@
 
   -- USAGE ----------------------------------------------------------------
     .\install.ps1 -DryRun     # safe trial on spare port 3098, touches nothing
-    .\install.ps1             # real install / migration
+    .\install.ps1             # real install / migration (keeps existing config)
     .\install.ps1 -Force      # overwrite locally-modified runtime files
     .\install.ps1 -NewToken   # rotate the token (breaks cached phone tokens)
+    .\install.ps1 -RegenerateConfig   # rebuild config from the template
 #>
 [CmdletBinding()]
 param(
@@ -39,6 +40,10 @@ param(
   [switch]$Force,
   # Rotate the token instead of reusing it. Breaks any cached phone token.
   [switch]$NewToken,
+  # Rebuild the live config from config/cfg.template.json. Off by default:
+  # the template holds GENERIC paths, so applying it would replace this
+  # machine's real service paths with placeholders and nothing would start.
+  [switch]$RegenerateConfig,
   # Runtime directory (the deployment copy, independent of dsh).
   [string]$RuntimeDir = "$env:USERPROFILE\.supervisord-center",
   # Spare port used by -DryRun.
@@ -154,16 +159,86 @@ if (-not $Token) {
 # actual token as the literal placeholder -- a config that parses fine, looks
 # fine at a glance, and is silently unauthenticated. Verified by reproducing
 # it. So: require exactly one occurrence, and require zero afterwards.
-$ph = '__TOKEN__'
-$phCount = ([regex]::Matches((Get-Content $TplJson -Raw -Encoding UTF8), [regex]::Escape($ph))).Count
-if ($phCount -ne 1) {
-  Say "  [x] template must contain exactly one $ph placeholder, found $phCount"
-  Say '      (a placeholder inside a comment is substituted first and silently wins)'
+# (The actual check lives below, inside the "template is used" branch.)
+#
+# --- config policy: an existing config WINS over the template -------------
+#
+# The template is a GENERIC starting point (paths like %APPDATA%\... and
+# C:\path\to\your\workspace) so the published repo carries no personal paths.
+# A live config, by contrast, holds this machine's real service paths.
+#
+# So if a config already exists, it wins. Rebuilding it from the template would
+# replace working paths with placeholders -- the services would then never
+# start, and the failure would look like "supervisord broke" rather than "the
+# installer overwrote my config". Only -RegenerateConfig rebuilds it.
+#
+# This runs BEFORE the template is filled in, so the "expanded N placeholders"
+# line only appears when the template is actually going to be used -- otherwise
+# it would report work whose result is thrown away.
+$cfgFromTemplate = $false
+$cfgText = $null
+if ((Test-Path $RuntimeCfg) -and -not $RegenerateConfig) {
+  $existing = (Get-Content $RuntimeCfg -Raw -Encoding UTF8).TrimStart([char]0xFEFF)
+  try {
+    $ec = $existing | ConvertFrom-Json
+    Ok "keeping existing config ($($ec.services.Count) services); template not applied"
+    Say '        pass -RegenerateConfig to rebuild it from config/cfg.template.json'
+    $cfgText = $existing
+  } catch {
+    Warn "existing config is unreadable ($($_.Exception.Message)) - rebuilding from template"
+  }
+}
+
+if (-not $cfgText) {
+  $cfgFromTemplate = $true
+  $ph = '__TOKEN__'
+  $phCount = ([regex]::Matches((Get-Content $TplJson -Raw -Encoding UTF8), [regex]::Escape($ph))).Count
+  if ($phCount -ne 1) {
+    Say "  [x] template must contain exactly one $ph placeholder, found $phCount"
+    Say '      (a placeholder inside a comment is substituted first and silently wins)'
+    Remove-TrialDir
+    exit 1
+  }
+  $cfgText = (Get-Content $TplJson -Raw -Encoding UTF8).Replace($ph, $Token)
+  if ($cfgText.Contains($ph)) { Say "  [x] $ph survived substitution"; Remove-TrialDir; exit 1 }
+
+  # Expand %APPDATA%-style placeholders in the template.
+  #
+  # The template ships generic paths (%APPDATA%\...) so the published file
+  # carries no personal identifiers. Node's spawn does NOT expand %VAR%, and
+  # the template is filled by plain string substitution -- so without this step
+  # the config would hold a literal "%APPDATA%" and the service would never start.
+  #
+  # CRITICAL: the expansion must also JSON-escape. ExpandEnvironmentVariables
+  # returns C:\Users\... with SINGLE backslashes, and a single backslash is an
+  # invalid JSON escape -- so naively expanding produces a config that fails to
+  # parse. (Caught this by actually parsing the result, not by eyeballing it.)
+  # Backslashes in the substituted value are therefore doubled.
+  #
+  # Order matters: this runs AFTER token substitution, so a token containing
+  # "%" can never be reinterpreted as a variable reference.
+  $expanded = 0
+  $cfgText = [regex]::Replace($cfgText, '%([A-Za-z_][A-Za-z0-9_]*)%', {
+      param($m)
+      $name = $m.Groups[1].Value
+      $val = [Environment]::GetEnvironmentVariable($name)
+      if (-not $val) { return $m.Value }   # leave it visible rather than blank it
+      $script:expanded++
+      return $val.Replace('\', '\\')
+  })
+  if ($expanded -gt 0) { Ok "expanded $expanded environment placeholder(s) in config paths" }
+}
+
+# Final guard: whatever we are about to write must actually parse.
+# A template edit that breaks JSON, or a hand-edited config with a stray
+# comma, would otherwise only surface as a mysterious startup failure.
+try {
+  $null = $cfgText | ConvertFrom-Json
+} catch {
+  Say "  [x] config to be written is not valid JSON: $($_.Exception.Message)"
   Remove-TrialDir
   exit 1
 }
-$cfgText = (Get-Content $TplJson -Raw -Encoding UTF8).Replace($ph, $Token)
-if ($cfgText.Contains($ph)) { Say "  [x] $ph survived substitution"; Remove-TrialDir; exit 1 }
 
 # --- local-modification guard ---------------------------------------------
 # Refuse to clobber a runtime file that differs from the source. The old

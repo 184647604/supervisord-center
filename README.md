@@ -69,11 +69,19 @@ authenticated with a user account as a Service host* —— 本机是用户账�
 ## 4. 快速开始
 
 ```powershell
-cd "C:\Users\sun\Documents\DeepSeek Harnss\supervisord-center"
+cd C:\path\to\supervisord-center
 
 .\install.ps1 -DryRun    # 先试运行：备用端口起临时实例，绝不碰现有服务
 .\install.ps1            # 正式安装 / 从 dsh-supervisor 迁移
 ```
+
+首次安装会从 `config/cfg.template.json` 生成配置。**模板里的路径是通用的**
+（`%APPDATA%\...`、`C:\path\to\your\workspace`），安装时会自动展开环境变量，
+但服务路径需要你自己填成实际的。
+
+**已经装过的话，`install.ps1` 默认保留现有配置**，不会用模板覆盖它 ——
+否则你辛苦配好的服务路径会被占位符替换掉，而且症状是「服务莫名起不来」，
+很难联想到是安装脚本干的。要强制重建才用 `-RegenerateConfig`。
 
 | 参数 | 作用 |
 |---|---|

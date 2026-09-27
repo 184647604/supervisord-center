@@ -1,0 +1,22 @@
+# 统一换行符。没有这个文件的话，Windows 上 clone 下来是 CRLF、
+# 别处是 LF，同一个脚本在不同机器上 diff 全红。
+#
+# 仓库里存 LF（跨平台一致），检出时按平台转换：
+* text=auto eol=lf
+
+# PowerShell 脚本必须是 CRLF，否则某些老版本 PS 解析会出问题
+*.ps1 text eol=crlf
+
+# cmd 包装器同理（cmd.exe 对 LF-only 的 .cmd 处理不可靠）
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# 二进制，别碰
+*.png binary
+*.jpg binary
+*.ico binary
+*.zip binary
+
+# 这两个是给 GitHub 语言统计用的，别让它们被当成别的语言
+*.md text
+LICENSE text

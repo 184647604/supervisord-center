@@ -310,6 +310,53 @@ GET  /super              → 带 Cookie，返回管理页
    `http://127.0.0.1:3099` 登录失效（和 workbuddy 的 `ADMIN_INSECURE_COOKIE`、
    doubao 的 `SECURE_COOKIE` 是同一个权衡）。
 
+### 登录限流（token 变短后必须有）
+
+**为什么加**：token 是可配置的。一旦选成人能记住的短串（比如纯数字手机号），
+搜索空间就从 32 位随机串（约 2^256）掉到 11 位数字（10^11，且按手机号规律
+实际更小）。而登录接口原本**没有任何节流**，可以无限次猜。
+workbuddy 和 doubao 的控制台都做了「10 分钟 8 次」限流，这里照同一个约定：
+
+```
+前 8 次失败  → 401，返回「令牌不正确」
+             → 快用完时改口：「令牌不正确，还可尝试 3 次」
+第 9 次起    → 429 + Retry-After，返回「尝试次数过多，请 10 分钟后再试」
+成功登录     → 清空该来源的失败计数
+```
+
+用 `loginMaxFails` / `loginWindowMs` 可调（默认 8 次 / 10 分钟）。
+
+**按来源 IP 分桶 —— 但实测只有一个桶。** 经 tailscale serve 进来的请求，
+`remoteAddress` **全是 `127.0.0.1`**（serve 从本机回环转发）：
+
+```
+2026-09-27T18:48:07.238Z login ok from 127.0.0.1
+2026-09-27T18:53:51.534Z 401 POST /login from 127.0.0.1
+```
+
+所以限流实际是**全局单桶**。这对本工具是**想要**的行为：单用户场景下，
+攻击者无法靠换源 IP 绕过。代码仍按 IP 分桶而不是写死全局，这样直连
+（不经 serve）时语义依然正确。
+
+**代价要说清楚**：全局桶意味着攻击者可以把桶打满，让**你自己**也暂时登不进去
+（实测第 4 步验证了「限流中正确 token 同样被 429」）。这是有意的取舍 ——
+短暂登不上，好过被无限次猜测。两个缓解：
+
+- **成功即清空**计数，所以正常使用不会累积到被锁（有测试覆盖）。
+- 计数是**内存态**，重启控制面即清零（也就等于 `install.ps1` 重启一次）。
+
+**真正该做的还是用长随机 token。** 限流是兜底，不是把短 token 变安全的办法 ——
+`install.ps1 -NewToken` 会生成 43 位 URL-safe 随机串。
+
+### 换 token 的连带影响
+
+`sessionValue()` 是 `HMAC(token)`，所以**换 token 会让所有已签发的 Cookie 立刻失效**，
+需要重新登录。这是刻意的（见上面第 2 条），但换之前要知道：
+手机上如果存过登录态，换完要重新输一次。
+
+`install.ps1` 默认**沿用**旧 token（只在显式 `-NewToken` 时轮换），
+正是为了避免这种「静默失效」。
+
 无 Cookie 且 `Accept: text/html` 时给登录页，API 调用仍给 401 JSON ——
 否则手机上打开 `/super` 只会看到一行 `{"error":"unauthorized"}`，没人知道该干嘛。
 
@@ -471,13 +518,43 @@ goto loop
 | **UI 点「重启」** | 点 Doubao 的重启按钮 | ✅ PID 变化（20000→3464），重启后 `/health` 返回 `logged_in:true` |
 | 生产部署 | WMI 重启到多服务版 | ✅ 父进程 `WmiPrvSE.exe`，4 服务全部在线 |
 
+### 登录限流（`tools/test-login-ratelimit.js`，13 项全过）
+
+在备用端口起隔离实例测的，不碰生产：
+
+| 项目 | 结果 |
+|---|---|
+| 新 token 走请求头 / Bearer | ✅ 200 / 200 |
+| 错一位的 token | ✅ 401 |
+| 前 8 次失败 | ✅ 全 401 |
+| 第 9 次失败 | ✅ 429 |
+| 429 带 `message` 与 `retryAfterSec` | ✅ `"尝试次数过多，请 10 分钟后再试"`, 600 |
+| 限流中正确 token 也被挡 | ✅ 429（全局桶的有意代价） |
+| 重启后计数清零 | ✅ 204 |
+| 成功登录清空计数 | ✅ 成功后连失 7 次仍未限流 |
+| Cookie 会话不受登录限流影响 | ✅ 200 |
+
+真机（tailnet）上也点了一遍：第 5 次失败时页面显示「令牌不正确，还可尝试 3 次」，
+第 9 次显示「尝试次数过多，请 10 分钟后再试」—— **不是静默无反应**。
+
+### token 轮换
+
+| 项目 | 结果 |
+|---|---|
+| 改 token 后本机 API | ✅ 200 |
+| **旧 token 失效** | ✅ 401 |
+| tailnet `/super/services` | ✅ 4 个服务全在线 |
+| 表单登录换 Cookie | ✅ 204 + Cookie |
+| **旧 Cookie 自动失效** | ✅ `HMAC(token)` 派生，换 token 即失效（登录页重新出现） |
+
 **全程未触碰正在跑的 DSH web（pid 13512）**。
 
 ### 测试夹具
 
 ```powershell
-node tools/dummy-target.js 8099   # 极小 HTTP 假服务，测 start/restart 全链路
-node tools/probe-launch.js        # 量各种 spawn 配置下 :loop 是否被节流
+node tools/dummy-target.js 8099        # 极小 HTTP 假服务，测 start/restart 全链路
+node tools/probe-launch.js             # 量各种 spawn 配置下 :loop 是否被节流
+node tools/test-login-ratelimit.js     # 登录限流 13 项断言（隔离端口，不碰生产）
 ```
 
 `probe-launch.js` 的价值在于它**推翻了我自己的一个错误结论**（见 §13 末尾）。
@@ -487,10 +564,13 @@ node tools/probe-launch.js        # 量各种 spawn 配置下 :loop 是否被节
 | 暴露面 | 现状 | 风险 |
 |---|---|---|
 | `3099` 控制面 | 需 token（明文存在配置里），经 `/super` 暴露给 **tailnet** | 拿到 token 的设备可**启动/重启你的服务**（含 DSH）。不是公网，但 tailnet 内任何拿到 token 的设备都能用 |
+| **token 强度** | 当前是可配置的短串 | **这是最弱的一环**。限流（10 分钟 8 次）兜住了在线爆破，但挡不住离线猜测 —— token 明文存在配置文件和 tailnet 客户端的缓存里。要更稳就用 `install.ps1 -NewToken` 换成 43 位随机串 |
 | 浏览器会话 Cookie | `HMAC(token)` 派生值，`HttpOnly`，30 天 | 派生值泄漏不能直接当 API token 用，且换 token 即失效 |
+| 登录限流 | 10 分钟 8 次，全局单桶（来源都是 127.0.0.1） | 攻击者打满桶会让你也暂时登不进去；重启即清零 |
 | 监听地址 | **恒为 `127.0.0.1`** | 不对外网卡暴露。不要改成 `0.0.0.0`：本机用户不是管理员，Windows 防火墙会拦截，而且外网可达性已交给 Tailscale |
 | 配置文件 | 含明文 token | **按凭据对待**，不要进版本库（`.gitignore` 已排除） |
 | 管理页的「停止」 | 能杀掉带 `:loop` 的包装器 | 这是有意的：能停才能重启。但也意味着误操作能停掉服务——tailnet 内拿到 token 即可 |
+| **凭据复用** | 本 token 与 workbuddy 的 `ADMIN_KEY`、doubao 的 `DOUBAO2API_ADMIN_KEY` 同值 | **一处泄漏即三处失守**。想隔离就分开设，代价是要多记几个串 |
 
 ## 16. 文件
 
@@ -502,6 +582,7 @@ supervisord-center/
 ├── install.ps1                     # 安装 / 迁移（纯 ASCII）
 ├── tools/dummy-target.js           # 测试夹具：极小 HTTP 假服务
 ├── tools/probe-launch.js           # 测试夹具：量 :loop 节流与 spawn 配置
+├── tools/test-login-ratelimit.js   # 测试夹具：登录限流 13 项断言
 ├── _history/                       # 改造前的旧版本，仅存档
 │   ├── dsh-supervisor.released-v1.js
 │   ├── review-dsh-supervisor.js

@@ -538,6 +538,44 @@ function authorized(req) {
   return false;
 }
 
+// ── 登录限流 ────────────────────────────────────────────────────────────
+//
+// 为什么需要：token 是可配置的，一旦选成人能记住的短串（例如纯数字手机号），
+// 搜索空间就比 32 位随机串小几个数量级，而登录接口本身没有任何节流。
+// workbuddy 和 doubao 的控制台都做了「10 分钟 8 次」限流，这里照同一个约定。
+//
+// 按来源 IP 分桶。**实测：经 tailscale serve 进来的请求 remoteAddress 全是
+// 127.0.0.1**（serve 从本机回环转发），所以实际只有一个桶 —— 也就是全局限流。
+// 这对本工具是**想要**的行为：单用户，攻击者没法靠换源 IP 绕过。
+// 但代码仍按 IP 分桶而不是写死全局，这样直连（不经 serve）时语义依然正确。
+//
+// 代价要说清楚：全局桶意味着攻击者可以把桶打满，让**你自己**暂时登不进去。
+// 这是有意的取舍 —— 短暂登不上，好过被无限次猜测。成功登录会清空计数，
+// 所以正常使用不会累积。
+const LOGIN_MAX_FAILS = Number(config.loginMaxFails || 8);
+const LOGIN_WINDOW_MS = Number(config.loginWindowMs || 600000); // 10 分钟
+const loginFails = new Map(); // ip -> number[]（失败时刻）
+
+function loginBucket(ip) {
+  const now = Date.now();
+  const hits = (loginFails.get(ip) || []).filter((t) => now - t < LOGIN_WINDOW_MS);
+  if (hits.length) loginFails.set(ip, hits); else loginFails.delete(ip);
+  return hits;
+}
+
+function loginBlockedFor(ip) {
+  const hits = loginBucket(ip);
+  if (hits.length < LOGIN_MAX_FAILS) return 0;
+  // 要等最早那次失败滑出窗口，才恢复一次机会
+  return Math.max(0, LOGIN_WINDOW_MS - (Date.now() - hits[0]));
+}
+
+function noteLoginFail(ip) {
+  const hits = loginBucket(ip);
+  hits.push(Date.now());
+  loginFails.set(ip, hits);
+}
+
 function readBody(req, limit = 8192) {
   return new Promise((resolve) => {
     let data = '';
@@ -594,7 +632,9 @@ const LOGIN_HTML = `<!doctype html>
 document.getElementById('f').addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const e = document.getElementById('e');
+  const btn = ev.target.querySelector('button');
   e.textContent = '';
+  btn.disabled = true;
   try {
     const r = await fetch('', {
       method: 'POST',
@@ -602,8 +642,19 @@ document.getElementById('f').addEventListener('submit', async (ev) => {
       body: 'token=' + encodeURIComponent(document.getElementById('t').value),
     });
     if (r.ok) { location.reload(); return; }
-    e.textContent = r.status === 401 ? '令牌不正确' : ('失败：HTTP ' + r.status);
-  } catch (err) { e.textContent = '请求失败：' + err.message; }
+    // 服务端会给出可读原因（含限流剩余时间与剩余尝试次数），
+    // 直接用它的 message —— 否则「没反应」会被当成页面坏了。
+    let msg = '';
+    try { msg = (await r.json()).message || ''; } catch {}
+    if (msg) { e.textContent = msg; }
+    else if (r.status === 429) { e.textContent = '尝试次数过多，请稍后再试'; }
+    else if (r.status === 401) { e.textContent = '令牌不正确'; }
+    else { e.textContent = '失败：HTTP ' + r.status; }
+  } catch (err) {
+    e.textContent = '请求失败：' + err.message;
+  } finally {
+    btn.disabled = false;
+  }
 });
 </script></body></html>`;
 
@@ -756,14 +807,39 @@ const server = http.createServer(async (req, res) => {
 
   // 登录必须放在鉴权之前，否则没法登录。它自己校验 body 里的 token。
   if (req.method === 'POST' && (route === '/' || route === '/login')) {
+    const ip = req.socket.remoteAddress || '?';
+    const waitMs = loginBlockedFor(ip);
+    if (waitMs > 0) {
+      const mins = Math.ceil(waitMs / 60000);
+      log('429 POST /login from ' + ip + ' (rate limited, ' + mins + ' min left)');
+      res.writeHead(429, {
+        'content-type': 'application/json; charset=utf-8',
+        'retry-after': String(Math.ceil(waitMs / 1000)),
+        'cache-control': 'no-store',
+      });
+      // 明确告诉用户还要等多久 —— 否则「登录页没反应」会被当成坏了
+      return res.end(JSON.stringify({
+        ok: false, error: 'too-many-attempts',
+        message: '尝试次数过多，请 ' + mins + ' 分钟后再试',
+        retryAfterSec: Math.ceil(waitMs / 1000),
+      }));
+    }
+
     const body = await readBody(req);
     const params = new URLSearchParams(body);
     const given = params.get('token') || '';
     if (!timingSafeEq(given, TOKEN)) {
-      log('401 POST /login from ' + (req.socket.remoteAddress || '?'));
+      noteLoginFail(ip);
+      const left = Math.max(0, LOGIN_MAX_FAILS - loginBucket(ip).length);
+      log('401 POST /login from ' + ip + ' (' + left + ' attempts left)');
       res.writeHead(401, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-      return res.end(JSON.stringify({ ok: false, error: 'unauthorized' }));
+      return res.end(JSON.stringify({
+        ok: false, error: 'unauthorized',
+        // 剩余次数只在快用完时才提示，避免帮攻击者确认「猜对了格式」
+        message: left <= 3 ? ('令牌不正确，还可尝试 ' + left + ' 次') : '令牌不正确',
+      }));
     }
+    loginFails.delete(ip); // 成功即清空，避免正常使用累积到被锁
     // HttpOnly：页面脚本读不到它，XSS 也偷不走。
     // SameSite=Lax：够用且不影响 tailnet 上的正常导航。
     // 不设 Secure：Tailscale 侧是 HTTPS，但 loopback 直连是 HTTP，设了会让
@@ -773,7 +849,7 @@ const server = http.createServer(async (req, res) => {
       'set-cookie': 'sdc_session=' + sessionValue() + '; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000',
       'cache-control': 'no-store',
     });
-    log('login ok from ' + (req.socket.remoteAddress || '?'));
+    log('login ok from ' + ip);
     return res.end();
   }
 

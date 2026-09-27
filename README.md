@@ -86,31 +86,37 @@ cd "C:\Users\sun\Documents\DeepSeek Harnss\supervisord-center"
 安装脚本做六件事：检查源 → 建运行时目录与配置 → 语法检查 → **迁移**（停旧进程、
 注销旧计划任务、归档旧目录）→ 经 WMI 启动 → 健康探测 + 注册登录自启。
 
-## 5. HTTP 接口
+## 5. 接口速查
 
-**鉴权**：只认请求头，**刻意不支持 `?token=`**（query string 会进访问日志、Referer
-和各种中间层，等于给 token 多开几条泄漏路径）。
+**鉴权**：请求头 `x-supervisord-center-token` 或 `Authorization: Bearer <token>`；
+浏览器管理页走 Cookie（见 §12）。**刻意不支持 `?token=`** —— query string 会进访问日志、
+Referer 和各种中间层，等于给 token 多开几条泄漏路径。
 
 ```powershell
-$h = @{ 'x-supervisord-center-token' = '<token>' }   # 或 Authorization: Bearer <token>
+$h = @{ 'x-supervisord-center-token' = '<token>' }
 ```
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| `GET` | `/health`（也接受 `/` 和 `/super`） | 查状态 |
-| `POST` | `/start` | 启动。**幂等**：已在跑则回 `alreadyRunning:true`，无副作用 |
-| `POST` | `/restart` | 先停再起 |
+| `GET` | `/services` | 全部服务 + 在线状态（管理页数据源） |
+| `POST` | `/services/<id>/start\|stop\|restart` | 按服务操作 |
+| `GET` | `/health` `/super` `/status` | 默认服务的状态，**旧字段名保留** |
+| `POST` | `/start` `/restart` | 旧接口，作用于 `defaultService` |
+| `GET` | `/` `/ui` | 管理页（无 Cookie 时给登录页） |
+| `POST` | `/` `/login` | 用 body 里的 token 换 Cookie |
 
-`/health` 返回：
+完整的多服务说明见 §13，逐项验证结果见 §14。
+
+`/health` 返回（字段名沿用旧的，原因见下）：
 
 ```jsonc
 {
   "ok": true, "running": true,          // running = TCP 探测目标端口的结果
-  "dshWebPort": 3080, "targetPort": 3080,   // 同一值的两个名字，见下
+  "dshWebPort": 3080, "targetPort": 3080,   // 同一值的两个名字
   "supervisorPort": 3099, "centerPort": 3099,
   "launchedPid": null, "launchedAt": null,  // 只记「本实例拉起来的」；别人起的就是 null
-  "supervisorPid": 6972, "centerPid": 6972,
-  "uptimeSec": 183100
+  "supervisorPid": 10172, "centerPid": 10172,
+  "uptimeSec": 949
 }
 ```
 
@@ -161,10 +167,10 @@ Missing closing '}' in statement block or type definition.
 > 要求第二个参数是 char，传空字符串报 *"String must be exactly one character long"*。
 > 剥 BOM 请用 `.TrimStart([char]0xFEFF)`。
 
-## 8. 配置
+## 8. 配置文件的摆放
 
 `config/cfg.template.json` 是模板，install 脚本读它、注入真实 token、生成
-`supervisord-center.config.json`。模板里的字段说明写在 JSON 的 `_comment` 数组里。
+`supervisord-center.config.json`。**服务清单的字段说明见 §13**，这里只讲文件放哪。
 
 **配置查找顺序**（第一个存在的胜出，实际选中的会记进日志）：
 
@@ -176,6 +182,11 @@ Missing closing '}' in statement block or type definition.
 之所以不写死单点：这个脚本有**两种合法摆放方式**（在项目里跑、被拷到别处单文件跑），
 迁移期还可能留着旧路径。写死会让「配置该放哪」变成每次都要重新推理的问题。
 
+> **模板里只能有一个 token 占位符。** 第一版模板在 `_comment` 说明文字里也提了一次
+> 占位符，而那段注释在真正的 token 字段**上面**，于是单次 `.Replace()` 替换掉了注释、
+> 把真字段留成了字面量 —— 配置能解析、看着也对，但**实际上是空令牌**。
+> 实测复现过。现在 install 脚本会先断言占位符恰好出现 1 次，替换后再断言 0 次残留。
+
 ### 运行时目录
 
 默认 `~/.supervisord-center/`（`$env:SUPERVISORD_CENTER_HOME` 可覆盖）：
@@ -184,7 +195,8 @@ Missing closing '}' in statement block or type definition.
 ~/.supervisord-center/
 ├── supervisord-center.js              # 部署副本
 ├── supervisord-center.config.json     # 含 token，按凭据对待
-└── logs/center.log                    # 超 256 KB 自动清空
+├── logs/center.log                    # 超 256 KB 自动清空
+└── _archive-dsh-supervisor-<时间戳>/   # 迁移归档，可回滚
 ```
 
 **刻意不放在 `~/.dsh/` 下** —— 这是「完全独立」的一部分：本进程托管 dsh web，
@@ -251,29 +263,172 @@ supervisor 的地址和 token 拿到并缓存备用。失效后 App 拿不到这
 
 ## 11. 路线图
 
-- [x] **第一步：建项目 + 改名**（本次完成，已端到端验证，见 §14）
-- [ ] **第二步：多服务化** —— 现在配置里的 `dsh` 段是**单服务**的，只支持托管一个。
-      改造方向：`services: [{id, name, cmd, args, cwd, port, autostart}]`，
-      路由改成 `/services/:id/{start,stop,restart}`，并加 Web 管理页。
-- [ ] **第三步：Web 前端管理页** —— 看到连接了哪些服务、启动了哪些。
+- [x] **第一步：建项目 + 改名**
+- [x] **第二步：多服务化** —— `services[]` 数组 + `/services/<id>/<动作>` 路由
+- [x] **第三步：Web 管理页** —— 见 §12
 
-### 第二步的真正难点：「怎么停」要逐服务设计
+三步都已完成并上线，现在托管 4 个服务。
 
-不是把配置改成数组就完事。本机三个现有服务的启动方式**根本不同**：
+## 12. Web 管理页
 
-| 服务 | 启动方式 | 停止的坑 |
+打开 `https://<你的节点>.ts.net/super`，用 token 登录：
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│ supervisord-center                       4 / 4 在线                 │
+│ [全部拉起] [刷新] ☑每5秒自动刷新                                     │
+├──────────────┬──────┬───────┬───────┬────────────────────┬─────────┤
+│ 服务          │ 状态 │ 端口  │ PID   │ 地址                │ 操作    │
+├──────────────┼──────┼───────┼───────┼────────────────────┼─────────┤
+│ DSH Web GUI  │ ●在线│ 3080  │ 13512 │ …ts.net/           │ 启动 重启 停止│
+│ Traework API │ ●在线│ 39311 │ 18180 │ …ts.net/traework/  │ 启动 重启 停止│
+│ WorkBuddy API│ ●在线│ 8787  │ 6816  │ …ts.net/workbuddy/ │ 启动 重启 停止│
+│ Doubao API   │ ●在线│ 8790  │ 20000 │ …ts.net/doubao/    │ 启动 重启 停止│
+└──────────────┴──────┴───────┴───────┴────────────────────┴─────────┘
+```
+
+离线行会变红底，绿点/红点表示在线/离线，PID 是现查的（不是记账来的）。
+
+### 浏览器怎么过鉴权
+
+API 用请求头，但**浏览器导航设不了请求头**。所以管理页走另一条路：
+
+```
+GET  /super              → 无 Cookie 时返回登录页（不是干巴巴的 401 JSON）
+POST /super  token=...   → 校验通过后 Set-Cookie: sdc_session=...; HttpOnly
+GET  /super              → 带 Cookie，返回管理页
+```
+
+三个刻意的设计：
+
+1. **token 放在 POST body 里，不进 URL** —— 和「不支持 `?token=`」是同一条理由：
+   query string 会进访问日志、Referer、浏览器历史。
+2. **Cookie 里存的不是 token**，而是 `HMAC-SHA256(token, 固定串)`。token 是长期凭据，
+   浏览器会把它落到磁盘的 cookie 库；派生值同样能证明「持有 token」，
+   但泄漏出去不能直接当 API token 用，而且**换 token 就自动失效**。
+3. **`HttpOnly` 开，`Secure` 不开** —— loopback 直连是 HTTP，开 `Secure` 会让
+   `http://127.0.0.1:3099` 登录失效（和 workbuddy 的 `ADMIN_INSECURE_COOKIE`、
+   doubao 的 `SECURE_COOKIE` 是同一个权衡）。
+
+无 Cookie 且 `Accept: text/html` 时给登录页，API 调用仍给 401 JSON ——
+否则手机上打开 `/super` 只会看到一行 `{"error":"unauthorized"}`，没人知道该干嘛。
+
+### 路径前缀的坑（已处理）
+
+tailscale serve 会把 `/super` **剥掉**再转发（实测：`/super/nonexistent` 拿到的是
+本进程的 404 JSON，不是 DSH 的页面）。所以服务端只看到 `/`，**不知道自己挂在哪个前缀下**。
+
+浏览器侧的相对路径解析又依赖末尾斜杠：访问 `/super`（无斜杠）时 `fetch('services')`
+会解析到 `https://host/services`，**打到 DSH 上去**。页面因此用 JS 从
+`location.pathname` 反推 base 并补斜杠，`/super` 和 `/super/` 两种访问都测过。
+
+## 13. 多服务配置
+
+```jsonc
+{
+  "port": 3099, "host": "127.0.0.1", "token": "…",
+  "defaultService": "dsh",          // 旧接口 /start /restart 指向谁（App 兼容）
+  "services": [
+    { "id": "dsh", "name": "DSH Web GUI", "port": 3080, "via": "node",
+      "node": "C:\\Program Files\\nodejs\\node.exe",
+      "bin": "…\\@deepseek-ai\\dsh\\lib\\bin.js",
+      "args": ["web", "--no-open"], "cwd": "…\\DeepSeek Harnss",
+      "path": "/", "autostart": false },
+
+    { "id": "traework", "name": "Traework API", "port": 39311, "via": "cmd",
+      "file": "…\\Startup\\traework-api.cmd",
+      "path": "/traework/", "healthPath": "/v1/models" }
+  ]
+}
+```
+
+| 字段 | 作用 |
+|---|---|
+| `id` | 稳定标识，出现在 URL 里。别随便改 |
+| `port` | **存活探测端口 —— 在线/离线的唯一判据** |
+| `via` | `node` 直起可执行文件；`cmd` 起 `.cmd` 包装器 |
+| `path` | tailnet 路径前缀，只用于在页面上拼链接 |
+| `autostart` | 本进程启动后是否顺手拉起它 |
+| `healthPath` | 可选 HTTP 探针，**只是补充信息**；端口通但 HTTP 500 也是有用信号 |
+
+### 关键决策：直接复用各项目自己的 `.cmd`
+
+**没有**把环境变量抄进配置里。每个项目本来就有启动脚本（`doubao-api.cmd`、
+`traework-api.cmd`、`workbuddy-api.cmd`），里面有一堆关键配置
+（`DOUBAO2API_ADMIN_KEY`、`TRAE_PROXY_DISABLE_API_KEY`、`MANAGEMENT_DATA_DIR`…）。
+抄一份到配置里等于制造第二份真相 —— 以后改脚本，服务端还按旧的起，**而且没人会发现**。
+所以配置只记「用哪个脚本」。
+
+**但要注意指向哪一份**：`traework` 和 `workbuddy` 有**两份不同的**启动脚本 ——
+启动文件夹里那份和项目内那份内容不同（启动文件夹版多了 `TRAE_PROXY_HOST` /
+`TRAE_PROXY_DISABLE_API_KEY` 等设置，项目版没有），而**当前实际在跑的是启动文件夹那份**。
+配置指向的是启动文件夹，因为它们不等价。
+
+### `.cmd` 包装器的 `:loop` 与 `timeout`（实测数据，别想当然）
+
+包装器末尾都有：
+
+```bat
+:loop
+"%PY%" -m admin.server
+timeout /t 5 /nobreak >nul
+goto loop
+```
+
+`timeout` 需要一个**真正的控制台**做 stdin。少了它，循环会退化成**紧循环**。
+`tools/probe-launch.js` 量出来的结果：
+
+| spawn 配置 | 服务能否拉起 | 崩溃时 7 秒内循环次数 |
 |---|---|---|
-| DSH web | `spawn(node, [bin, 'web', '--no-open'])` | 直连可执行文件，简单 |
-| workbuddy / traework | **`.cmd` 启动脚本** | 脚本里有 `:loop` 自愈循环（死了自己 5 秒后重启）。**若只 kill 端口占用者，那个 cmd 会立刻把它拉回来** → 「你杀我起」拉锯 |
-| workbuddy | `python -m admin.server` | 是**两个进程**（venv 启动器 + 真身），只按端口 kill 会留下启动器（`DEPLOY.md` 明确记过这条） |
+| `detached: true` + `windowsHide` | ✅ | **2 次**（正常节流） |
+| `detached: false` | ✅ | **166 次**（紧循环，≈每秒 24 次重启风暴） |
+| `shell: true` | ✅ | 2 次 |
 
-所以多服务化必须先设计**每个服务的 stop 策略**：走 `.cmd` 还是绕过它直连真实进程、
-要不要先停掉自愈循环、要不要按进程树 kill。
+**决定因素是 `detached: true`**，不是「有没有控制台」。少了它，一个崩溃的服务会变成
+每秒二十几次的重启风暴 —— 这个数字值得跑一次探针去量，而不是靠推理。
 
-## 12. 验证记录
+> 我一开始用 `ProcessStartInfo` 手工搭管道去测，得到「紧循环」的结论并差点据此
+> 绕开 `.cmd`。后来发现那是**管道句柄**导致的假象，与 `detached` 无关。
+> 换成真正的 spawn 才量到上表。**测试夹具本身出错，比不测更危险** ——
+> 它会让你基于错的事实做出「正确」的决定。
 
-改造完成后逐项实测过。**真实 `/restart` 是刻意绕开 DSH 测的** —— 它会杀掉 DSH，
-而 DSH 正是执行测试的这个会话的宿主，所以用 `tools/dummy-target.js` 当靶子。
+### 「停止」为什么必须杀包装器
+
+`killService` 的顺序是**先杀包装器，再杀端口占用者**：
+
+1. `taskkill /PID <包装器> /T /F` —— `/T` 带上它的整棵子树（也就是真正监听的那个进程）
+2. 再按端口反查、杀残留
+
+顺序反了就会变成「你杀我起」的拉锯：包装器的 `:loop` 会在 5 秒后把服务拉回来，
+你看到的现象是**「停止成功了但服务还在」**。
+
+这也说明「停止」在这套架构里是**尽力而为**，不是核心语义 —— 用户明确说过
+自愈循环「没有影响」，要的是**看到在线/离线 + 能拉起来**。诚实地讲：
+如果某个包装器以我们认不出的姿势启动（命令行里没有配置的脚本路径），
+`/stop` 后服务会自己回来，接口会如实返回 `stillRunning: true`，不假装成功。
+
+### HTTP 接口
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `GET` | `/services` | 全部服务 + 状态（管理页数据源） |
+| `POST` | `/services/<id>/start` | 启动（幂等） |
+| `POST` | `/services/<id>/stop` | 尽力停（先杀包装器） |
+| `POST` | `/services/<id>/restart` | 停再起 |
+| `GET` | `/health` `/super` `/status` | 单服务状态，**旧字段名保留** |
+| `POST` | `/start` `/restart` | 旧接口，作用于 `defaultService` |
+| `GET` | `/` `/ui` | 管理页（无 Cookie 给登录页） |
+| `POST` | `/` `/login` | 用 body 里的 token 换 Cookie |
+
+**旧接口和旧字段名全部保留**：`/health` 仍返回 `dshWebPort` / `supervisorPort`，
+`/start` `/restart` 仍在 —— 手机 App 侧可能已经在解析它们，改名属于破坏性变更。
+
+## 14. 验证记录
+
+全部逐项实测。**真实 `/restart` 刻意绕开 DSH 测** —— 它会杀掉 DSH，而 DSH 正是
+执行测试的这个会话的宿主。
+
+### 第一步：建项目 + 改名
 
 | 项目 | 方法 | 结果 |
 |---|---|---|
@@ -282,37 +437,62 @@ supervisor 的地址和 token 拿到并缓存备用。失效后 App 拿不到这
 | 安装脚本语法 | `Parser::ParseFile` | ✅ 无解析错误 |
 | **WMI 脱离 Job** | 查新建进程的父进程 | ✅ 父 = `WmiPrvSE.exe`，非 dsh |
 | 存活探测 | 假目标（8001，无人监听） | ✅ `running:false` 正确 |
-| 鉴权（无 token） | 不带请求头请求 | ✅ 401 |
-| 鉴权（`?token=`） | 明确拒绝 query 传参 | ✅ 401 |
+| 鉴权（无 token） | 不带请求头 | ✅ 401 |
+| 鉴权（`?token=`） | 拒绝 query 传参 | ✅ 401 |
 | 鉴权（新请求头） | `x-supervisord-center-token` | ✅ 200 |
 | 鉴权（Bearer） | `Authorization: Bearer` | ✅ 200 |
 | 鉴权（旧请求头） | `x-dsh-supervisor-token` | ✅ 401（证明改名生效） |
-| tailnet 端到端 | `https://…ts.net/super/health` | ✅ 200 |
-| `/start` 幂等 | DSH 已在跑时调用 | ✅ `alreadyRunning:true`，DSH pid 未变（13512） |
+| `/start` 幂等 | DSH 已在跑时调用 | ✅ `alreadyRunning:true`，DSH pid 未变 |
 | **`/restart`** | 用假目标测完整链路 | ✅ 靶子换新进程（24524→23844） |
 | **无自杀 bug** | `/restart` 后查控制面自身 | ✅ 存活，`uptime` 连续，未触发 `kill(0)` |
-| DryRun 零副作用 | 查运行时目录 / 端口 / TEMP | ✅ 三者皆无残留 |
-| 迁移 | 真实从 dsh-supervisor 迁 | ✅ 旧进程停、旧任务注销、旧目录归档、新实例 WMI 起、token 沿用 |
+| DryRun 零副作用 | 查运行时目录 / 端口 / TEMP | ✅ 皆无残留 |
+| 迁移 | 真实从 dsh-supervisor 迁 | ✅ 旧进程停、旧任务注销、旧目录归档、token 沿用 |
 | token 沿用 | 首次迁移（新配置不存在） | ✅ 从**旧路径**取到（32 位） |
 
-**全程未触碰正在跑的 DSH web（pid 13512）**，除 `/start` 幂等测试确认它未被重启。
+### 第二步 + 第三步：多服务 + 管理页
+
+| 项目 | 方法 | 结果 |
+|---|---|---|
+| 启动方式探针 | `tools/probe-launch.js`，4 种 spawn 配置 | ✅ 量出 `detached` 是 `timeout` 节流的关键（见 §13） |
+| 服务识别 | `GET /services` | ✅ 4 个服务全识别，端口/PID/HTTP 探针都对 |
+| 旧字段兼容 | `GET /health` | ✅ 仍返回 `dshWebPort` / `supervisorPort` |
+| 浏览器过鉴权 | 无 Cookie + `Accept: text/html` | ✅ 返回登录页而非 401 JSON |
+| 错误 token 登录 | `POST /` body `token=wrong` | ✅ 401 |
+| 正确 token 登录 | `POST /` | ✅ 204 + `Set-Cookie`（`HttpOnly` 确认） |
+| Cookie 访问 API | 带会话 Cookie | ✅ 200 |
+| `?token=` 仍拒 | 登录页之后依旧不认 query | ✅ 401 |
+| **`/stop` 杀包装器** | 停 traework（带 `:loop`） | ✅ 端口释放、包装器消失、**等 8 秒 > 5 秒循环周期未被拉回** |
+| **`/start` 拉起来** | 再启动 traework | ✅ 1.5 秒起好，`/v1/models` 返回 **19 个模型** |
+| `/start` 幂等 | 已在跑时再调 | ✅ `alreadyRunning:true` |
+| 包装器重建 | 起后查 `cmd.exe` | ✅ 新包装器 pid=9984，父子关系正常 |
+| tailnet 不受影响 | `/traework/v1/models` | ✅ 200，19 个模型 |
+| 管理页渲染 | Playwright 截图 | ✅ 4 行服务、状态/端口/PID/链接/按钮齐全 |
+| **`/super` 无尾斜杠** | 直接访问无斜杠 URL | ✅ base 归一化为 `/super/`，4 行数据正常加载 |
+| **UI 点「重启」** | 点 Doubao 的重启按钮 | ✅ PID 变化（20000→3464），重启后 `/health` 返回 `logged_in:true` |
+| 生产部署 | WMI 重启到多服务版 | ✅ 父进程 `WmiPrvSE.exe`，4 服务全部在线 |
+
+**全程未触碰正在跑的 DSH web（pid 13512）**。
 
 ### 测试夹具
 
 ```powershell
-# tools/dummy-target.js 是个只回一行字的极小 HTTP 服务，
-# 用来在**不碰真实 DSH** 的前提下验证 start/restart 全链路。
-node tools/dummy-target.js 8099
+node tools/dummy-target.js 8099   # 极小 HTTP 假服务，测 start/restart 全链路
+node tools/probe-launch.js        # 量各种 spawn 配置下 :loop 是否被节流
 ```
 
-## 13. 安全
+`probe-launch.js` 的价值在于它**推翻了我自己的一个错误结论**（见 §13 末尾）。
+
+## 15. 安全
 
 | 暴露面 | 现状 | 风险 |
-| `3099` 控制面 | 需 token（明文存在配置里），经 `/super` 暴露给 **tailnet** | 拿到 token 的设备可**启动/重启**你的 DSH。不是公网，但 tailnet 内任何拿到 token 的设备都能用 |
+|---|---|---|
+| `3099` 控制面 | 需 token（明文存在配置里），经 `/super` 暴露给 **tailnet** | 拿到 token 的设备可**启动/重启你的服务**（含 DSH）。不是公网，但 tailnet 内任何拿到 token 的设备都能用 |
+| 浏览器会话 Cookie | `HMAC(token)` 派生值，`HttpOnly`，30 天 | 派生值泄漏不能直接当 API token 用，且换 token 即失效 |
 | 监听地址 | **恒为 `127.0.0.1`** | 不对外网卡暴露。不要改成 `0.0.0.0`：本机用户不是管理员，Windows 防火墙会拦截，而且外网可达性已交给 Tailscale |
 | 配置文件 | 含明文 token | **按凭据对待**，不要进版本库（`.gitignore` 已排除） |
+| 管理页的「停止」 | 能杀掉带 `:loop` 的包装器 | 这是有意的：能停才能重启。但也意味着误操作能停掉服务——tailnet 内拿到 token 即可 |
 
-## 14. 文件
+## 16. 文件
 
 ```
 supervisord-center/
@@ -320,14 +500,12 @@ supervisord-center/
 ├── config/cfg.template.json        # 配置模板（含字段说明）
 ├── config/supervisord-center.config.json  # 真实配置，含 token，不入库
 ├── install.ps1                     # 安装 / 迁移（纯 ASCII）
-├── tools/dummy-target.js           # 测试用假服务（验证 start/restart 用）
+├── tools/dummy-target.js           # 测试夹具：极小 HTTP 假服务
+├── tools/probe-launch.js           # 测试夹具：量 :loop 节流与 spawn 配置
 ├── _history/                       # 改造前的旧版本，仅存档
 │   ├── dsh-supervisor.released-v1.js
 │   ├── review-dsh-supervisor.js
 │   └── install-supervisor.ps1
-├── docs/
-├── logs/
-├── .gitignore
 └── README.md
 ```
 
@@ -336,15 +514,16 @@ supervisord-center/
 不剥 BOM、`process.kill(launchedPid || 0)` 的自杀路径、允许 `?token=`。
 **不要运行它**，只作参考。
 
-`tools/dummy-target.js` 是测试夹具：一个只回一行字的极小 HTTP 服务。
-用途是在**不碰真实 DSH** 的前提下验证 `/start` 与 `/restart` 的完整链路
-（起进程 → 探活 → kill → 再起）。真实 restart 会杀掉 DSH，而 DSH 正是本会话
-的宿主 —— 所以这条路径必须用假目标测：
+### 测试夹具为什么值得留在仓库里
 
-```powershell
-# 起一个指向假服务的独立实例（端口 3096），然后打它的 /start 和 /restart
-node tools/dummy-target.js 8099   # 手动起假服务看看
-```
+两个 `tools/*.js` 都是夹具，但它们记录的是**结论的来路**：
+
+- `dummy-target.js` —— 真实 `/restart` 会杀掉 DSH，而 DSH 正是开发时会话的宿主。
+  没有它，这条路径就只能靠推理，而推理在这件事上错过一次（见下）。
+- `probe-launch.js` —— 它**推翻了我自己的一个错误结论**。我先前手工用
+  `ProcessStartInfo` 搭管道测出「`:loop` 会变成紧循环」，差点据此绕开复用 `.cmd`。
+  换成真正的 `spawn` 才量到：决定因素是 `detached: true`，而管道才是元凶。
+  **夹具本身出错比不测更危险** —— 它会让你基于错的事实做出「正确」的决定。
 
 ## License
 

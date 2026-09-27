@@ -146,7 +146,24 @@ if (-not $Token) {
   Ok "generated new token (length $($Token.Length))"
 }
 
-$cfgText = (Get-Content $TplJson -Raw -Encoding UTF8).Replace('__TOKEN__', $Token)
+# Count the placeholders BEFORE substituting, then assert none survive.
+#
+# This is not paranoia: the first version of the template mentioned the
+# placeholder inside its own "_comment" text, which sits ABOVE the real token
+# field. A single .Replace() therefore substituted the COMMENT and left the
+# actual token as the literal placeholder -- a config that parses fine, looks
+# fine at a glance, and is silently unauthenticated. Verified by reproducing
+# it. So: require exactly one occurrence, and require zero afterwards.
+$ph = '__TOKEN__'
+$phCount = ([regex]::Matches((Get-Content $TplJson -Raw -Encoding UTF8), [regex]::Escape($ph))).Count
+if ($phCount -ne 1) {
+  Say "  [x] template must contain exactly one $ph placeholder, found $phCount"
+  Say '      (a placeholder inside a comment is substituted first and silently wins)'
+  Remove-TrialDir
+  exit 1
+}
+$cfgText = (Get-Content $TplJson -Raw -Encoding UTF8).Replace($ph, $Token)
+if ($cfgText.Contains($ph)) { Say "  [x] $ph survived substitution"; Remove-TrialDir; exit 1 }
 
 # --- local-modification guard ---------------------------------------------
 # Refuse to clobber a runtime file that differs from the source. The old
@@ -191,7 +208,16 @@ if ($DryRun) {
 try {
   $p = ((Get-Content $TestCfg -Raw -Encoding UTF8).TrimStart([char]0xFEFF)) | ConvertFrom-Json
   Ok "config parses: port=$($p.port) host=$($p.host) tokenLen=$($p.token.Length)"
-  if ($p.token -eq '__TOKEN__') { Say '  [x] token was not substituted!'; Remove-TrialDir; exit 1 }
+  # An unsubstituted token is not a cosmetic problem: the server treats a
+  # literal placeholder as a perfectly valid non-empty token, starts happily,
+  # and is then authenticated by a value that is printed in the template. Fail
+  # on both the placeholder and an empty value.
+  if (-not $p.token -or $p.token -eq '__TOKEN__') {
+    Say "  [x] token was not substituted (token='$($p.token)') - refusing to continue"
+    Remove-TrialDir
+    exit 1
+  }
+  if ($p.services) { Ok "config declares $($p.services.Count) services: $(($p.services | ForEach-Object { $_.id }) -join ', ')" }
 } catch { Say "  [x] config parse failed: $($_.Exception.Message)"; Remove-TrialDir; exit 1 }
 
 # ---------------------------------------------------------------------------
@@ -204,12 +230,42 @@ Ok 'node --check passed'
 if ($DryRun) {
   Head '4) DRY RUN: throwaway instance on a spare port'
 
-  # Point the trial at a dead target (8001) so /health must report
-  # running:false. That proves the liveness probe works while guaranteeing
-  # this dry run cannot start a second dsh web.
+  # Point the trial at a DEAD target (port 8001, nothing listening) so the
+  # liveness probe must report running:false. That proves the probe actually
+  # works, while guaranteeing this dry run can never start a second service.
+  #
+  # Schema-aware on purpose. The old single-service version just set
+  # $tmp.dsh.port = 8001. After the move to services[], that line became a
+  # silent no-op: the property no longer exists, PowerShell creates nothing on
+  # a PSCustomObject, and the trial happily probed the REAL port -- so the
+  # "dead target" assertion passed while testing nothing at all. Caught only
+  # because the dry run printed running:true. Rewrite every service, and fail
+  # loudly if neither shape is present rather than falling through.
   $tmp = ($cfgText | ConvertFrom-Json)
   $tmp.port = $DryRunPort
-  $tmp.dsh.port = 8001
+  $deadPort = 8001
+  if ($tmp.PSObject.Properties.Name -contains 'services') {
+    $i = 0
+    foreach ($svc in $tmp.services) {
+      $i++
+      $svc.port = $deadPort + $i          # 8002, 8003, ... all dead
+      # via=node only: a cmd trial would spawn a real console wrapper. The
+      # point here is to exercise the HTTP surface, not to launch anything.
+      $svc.via = 'node'
+      $svc.healthPath = ''
+      $svc.autostart = $false
+    }
+    $probePort = $deadPort + 1
+    Say "  trial: $($tmp.services.Count) services remapped to dead ports $($deadPort + 1).."
+  } elseif ($tmp.PSObject.Properties.Name -contains 'dsh') {
+    $tmp.dsh.port = $deadPort
+    $probePort = $deadPort
+    Warn 'config still uses the legacy single-service "dsh" shape'
+  } else {
+    Say '  [x] config has neither "services" nor "dsh" - cannot build a trial'
+    Remove-TrialDir
+    exit 1
+  }
   # Add-Member, not `$tmp.log = ...`: the template has no "log" key, and
   # assigning a brand-new property to a PSCustomObject throws
   # "The property 'log' cannot be found on this object".
@@ -224,10 +280,33 @@ if ($DryRun) {
   try {
     $h = Invoke-RestMethod "http://127.0.0.1:$DryRunPort/health" -Headers $hdr -TimeoutSec 8
     Ok "/health -> $($h | ConvertTo-Json -Compress)"
-    if ($h.running -eq $false -and $h.targetPort -eq 8001) {
-      Ok 'liveness probe correct (dead target reported running:false)'
+    if ($h.running -eq $false -and $h.targetPort -eq $probePort) {
+      Ok "liveness probe correct (dead target $probePort reported running:false)"
+    } else {
+      Say "  [x] liveness probe looks wrong: expected running=false on dead port $probePort," +
+          " got running=$($h.running) targetPort=$($h.targetPort)"
+      Say '      A running=true here means the trial is probing a REAL port, so this check'
+      Say '      proves nothing. Refusing to report success.'
+      Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+      Remove-TrialDir
+      exit 1
     }
   } catch { Warn "health failed: $($_.Exception.Message)" }
+
+  # The multi-service surface is the whole point of the new version, so the
+  # dry run exercises it too rather than only the legacy single-service /health.
+  try {
+    $svc = Invoke-RestMethod "http://127.0.0.1:$DryRunPort/services" -Headers $hdr -TimeoutSec 12
+    Ok "/services -> $($svc.services.Count) services, all offline as expected: " +
+       (($svc.services | ForEach-Object { "$($_.id)=$($_.running)" }) -join ' ')
+    $anyUp = @($svc.services | Where-Object { $_.running }).Count
+    if ($anyUp -gt 0) {
+      Say "  [x] $anyUp trial service(s) reported online - they were remapped to dead ports!"
+      Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+      Remove-TrialDir
+      exit 1
+    }
+  } catch { Warn "/services failed: $($_.Exception.Message)" }
 
   try {
     $null = Invoke-RestMethod "http://127.0.0.1:$DryRunPort/health" -TimeoutSec 8

@@ -197,6 +197,39 @@ $p = Get-CimInstance Win32_Process -Filter "ProcessId=<pid>"
 计划任务 `supervisord-center`（AtLogOn 触发器）。非管理员可注册，`Register-ScheduledTask`
 不需要提权。
 
+三点值得留意：
+
+- **是「登录时」不是「开机时」。** 触发器是 logon，没有 BootTrigger。重启后无人登录，
+  控制面不会起来。要开机即起得改用开机触发器并以「不管用户是否登录都运行」的身份注册，
+  那需要管理员权限和保存密码 —— 本项目刻意不要求管理员。
+- **默认有 72 小时运行上限。** `New-ScheduledTaskSettingsSet` 不指定时取系统默认
+  `ExecutionTimeLimit=PT72H`，连续跑满三天会被任务计划程序**强杀**，而 `RestartCount=0`
+  不会自动回来。要取消就在注册时加 `-ExecutionTimeLimit ([TimeSpan]::Zero)`（零 = 不限）。
+- **`Start-ScheduledTask` 起不来时不会报错。** 如果旧进程还占着端口，新进程会
+  `EADDRINUSE` 退出，而任务状态仍然显示 Ready，`LastTaskResult` 才是线索。
+  重启前先确认端口已释放。
+
+各服务自己的自启走**启动文件夹**（`shell:startup`），与控制面互不知情。控制面的
+`autostart` 只对**没有别的自启机制**的服务有意义 —— 已经在启动文件夹里的不需要它，
+开了反而两边抢着启动。
+
+> **什么时候必须用转发壳而不是复制。** 若脚本用 `%~dp0` 定位自己的项目目录
+> （`set "PROJ=%~dp0"`），把它**复制**进启动文件夹会让 `%~dp0` 指向启动文件夹，
+> 项目目录随之出错（找不到虚拟环境）。改为放一个转发壳：
+>
+> ```bat
+> @echo off
+> call "C:\path\to\real\launcher.cmd"
+> exit /b %ERRORLEVEL%
+> ```
+>
+> `call` 不改变被调脚本看到的 `%~dp0`，所以真实脚本仍能定位自己。顺带还避免了
+> 把脚本里的密钥复制到第二处。实测确认 `%~dp0` 在 `call` 转发下不变。
+>
+> 反过来，脚本若不依赖自身位置（路径全写死），直接复制即可，少一层间接。
+
+改了启动脚本后，记得同步配置里 `file` 指向的那一份 —— 指错了「停止」会失效。
+
 ### ③ 只用 TCP 探测判断死活
 
 不用 PID 记账 —— PID 会因重启失效，而「端口有人监听」是唯一可靠的存活信号。

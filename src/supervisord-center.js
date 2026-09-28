@@ -600,57 +600,68 @@ function readBody(req, limit = 8192) {
 // 让 /super 和 /super/ 两种访问方式都对。
 const LOGIN_HTML = `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0b0d0f">
 <title>supervisord-center 登录</title>
 <style>
+ /* 配色与列表页共用同一套变量，两个页面看起来才是一套东西。
+    这里同样只有两个色相：绿（在线）和琥珀（需注意），其余是灰阶。 */
  :root{
    color-scheme:dark;
-   --bg:#0b0f14; --face:#121820; --rule:#232c38;
-   --text:#dce3ec; --dim:#7b8798; --amber:#e3a008; --dead:#ff5d5d;
+   --bg:#0b0d0f; --surface:#121517;
+   --line:#23282c; --line-2:#30363b;
+   --text:#e9ecef; --text-2:#98a1a9; --text-3:#6a727a;
+   --ok:#3ddc97; --warn:#f5b544;
+   --mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,monospace;
  }
  *{box-sizing:border-box}
  html,body{margin:0}
  body{
-   min-height:100vh; min-height:100dvh;
-   background:radial-gradient(120% 80% at 50% -10%,#16202b 0,transparent 60%),var(--bg);
-   color:var(--text); display:grid; place-items:center; padding:20px;
+   min-height:100vh;min-height:100dvh;
+   background:var(--bg);color:var(--text);
+   display:grid;place-items:center;padding:20px;
    padding-bottom:max(20px,env(safe-area-inset-bottom));
-   font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+   font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+   -webkit-font-smoothing:antialiased;
    -webkit-tap-highlight-color:transparent;
  }
  .login-wrap{
-   width:min(100%,360px); background:var(--face); border:1px solid var(--rule);
-   border-radius:14px; padding:22px;
-   box-shadow:inset 0 1px 0 #ffffff0a, 0 18px 44px -22px #000;
+   width:min(100%,344px);background:var(--surface);border:1px solid var(--line);
+   border-radius:14px;padding:24px;
+   box-shadow:0 24px 48px -28px #000;
  }
- .brand{display:flex;align-items:center;gap:9px;margin-bottom:22px}
- /* 复用列表页的「实体指示灯」语言做品牌标记，两页看起来是一套东西 */
+ .brand{display:flex;align-items:center;gap:9px;margin-bottom:24px}
+ /* 品牌标记复用列表页的状态点语言：实心 + 外圈微光 */
  .mark{
-   width:11px;height:11px;border-radius:50%;flex:none;
-   background:radial-gradient(circle at 34% 28%,#ffffffb0,transparent 55%),var(--amber);
-   box-shadow:0 0 0 2px #05080b,0 0 10px 1px #e3a00866;
+   width:8px;height:8px;border-radius:50%;flex:none;
+   background:var(--ok);box-shadow:0 0 0 3px #3ddc971f;
  }
- .brand b{font-size:15px;font-weight:650;letter-spacing:-.01em}
- label{display:block;font-size:12px;color:var(--dim);margin-bottom:7px}
+ .brand b{font:600 12px/1.4 var(--mono);letter-spacing:.04em;color:var(--text-2)}
+ label{display:block;font-size:12px;color:var(--text-3);margin-bottom:7px}
  input{
-   width:100%; padding:12px 13px; border-radius:9px; border:1px solid var(--rule);
-   background:#0a0e13; color:var(--text); font:inherit;
-   font-family:ui-monospace,"Cascadia Mono",Consolas,monospace;
+   width:100%;padding:12px 13px;border-radius:9px;
+   border:1px solid var(--line-2);background:var(--bg);color:var(--text);
+   font:14px/1.4 var(--mono);
    transition:border-color .15s ease,box-shadow .15s ease;
  }
- input::placeholder{color:#4d5866}
- input:focus-visible{outline:none;border-color:var(--amber);box-shadow:0 0 0 3px #e3a00838}
+ input::placeholder{color:var(--text-3)}
+ input:focus-visible{outline:none;border-color:var(--text-2);box-shadow:0 0 0 3px #ffffff0f}
+ /* 按钮不填充琥珀：状态才是主角，操作不该压过它。
+    这里是页面唯一的动作，用亮灰填充即可区分主次。 */
  button{
-   width:100%; margin-top:14px; padding:13px; border:0; border-radius:9px;
-   background:var(--amber); color:#1a1200; font:inherit; font-weight:650;
-   cursor:pointer; touch-action:manipulation;
-   transition:background-color .15s ease;
+   width:100%;margin-top:8px;padding:12px;border:0;border-radius:9px;
+   background:var(--text);color:#0b0d0f;
+   font:600 14px/1.4 system-ui,sans-serif;
+   cursor:pointer;touch-action:manipulation;
+   transition:opacity .15s ease;
  }
- button:hover:not(:disabled){background:#f0ae12}
- button:active:not(:disabled){transform:translateY(1px)}
- button:disabled{opacity:.5;cursor:default}
- button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
- .err{color:var(--dead);font-size:13px;margin:12px 0 0;min-height:1.2em}
+ button:hover:not(:disabled){opacity:.88}
+ button:active:not(:disabled){transform:translateY(.5px)}
+ button:disabled{opacity:.4;cursor:default}
+ button:focus-visible{outline:2px solid var(--text-2);outline-offset:2px}
+ /* 错误用琥珀而非红：这是「输入不对」，不是系统故障。
+    红在这套配色里没有位置 —— 它意味着灾难，而输错一次令牌不是。 */
+ .err{color:var(--warn);font-size:12.5px;margin:12px 0 0;min-height:1.2em}
  @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style></head><body>
 <!-- 刻意不自动聚焦：手机上会在加载瞬间弹出键盘盖住半屏。只有一个字段，点一下不碍事。 -->
@@ -698,199 +709,227 @@ document.getElementById('f').addEventListener('submit', async (ev) => {
 const PAGE_HTML = `<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0b0f14">
+<meta name="theme-color" content="#0b0d0f">
 <title>supervisord-center</title>
 <style>
- /* 配色取自机柜/控制台的语汇，不是通用 SaaS 深色主题：
-    底板近黑、面板微亮、琥珀作为唯一的「操作/注意」色。 */
+ /* ── 配色：两个色相，仅此而已 ──────────────────────────────
+    上一版有六个色相在抢注意力：蓝色链接、亮琥珀主按钮、绿色开关、
+    绿/琥珀/红三种灯、红色 HTTP 标签。结果是「没有一个东西突出」。
+
+    这一版只保留两个色相，各自只承担一个语义：
+      绿 = 在线（唯一的「好」），琥珀 = 需注意（唯一的「异常」）
+    其余全部是无彩度的灰阶。具体地：
+      · 链接不再用蓝色 —— 它只是次要信息，用中性色 +  hover 下划线
+      · 离线不再用红色 —— 红色意味着「故障」，而没开只是没开
+      · 主按钮不再填充亮色 —— 状态才是主角，操作不该压过它 */
  :root{
    color-scheme:dark;
-   --bg:#0b0f14; --face:#121820; --sunken:#0a0e13; --rule:#232c38;
-   --text:#dce3ec; --dim:#7b8798;
-   --live:#3fd07a; --dead:#ff5d5d; --amber:#e3a008;
-   --mono:ui-monospace,"Cascadia Mono",Consolas,monospace;
+   --bg:#0b0d0f;
+   --surface:#121517;
+   --surface-2:#171b1e;
+   --line:#23282c;
+   --line-2:#30363b;
+   --text:#e9ecef;
+   --text-2:#98a1a9;
+   --text-3:#6a727a;
+   --ok:#3ddc97;
+   --warn:#f5b544;
+   --mono:ui-monospace,"Cascadia Mono","SF Mono",Consolas,monospace;
+   --r:10px;
  }
  *{box-sizing:border-box}
  html{-webkit-text-size-adjust:100%}
  body{
-   margin:0 auto; max-width:880px; padding:18px;
-   padding-left:max(18px,env(safe-area-inset-left));
-   padding-right:max(18px,env(safe-area-inset-right));
-   padding-bottom:max(18px,env(safe-area-inset-bottom));
-   background:var(--bg); color:var(--text);
-   font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+   margin:0 auto;max-width:1080px;padding:28px 20px 64px;
+   padding-left:max(20px,env(safe-area-inset-left));
+   padding-right:max(20px,env(safe-area-inset-right));
+   padding-bottom:max(64px,env(safe-area-inset-bottom));
+   background:var(--bg);color:var(--text);
+   font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+   -webkit-font-smoothing:antialiased;
    -webkit-tap-highlight-color:transparent;
  }
 
- /* ── 顶栏：铭牌 + 舰队灯带 ─────────────────────────────────
-    灯带是整个页面的论点：一眼扫完所有服务的状态，不用读任何字。
-    它不重复列表信息，它是「全部」的那个视角。 */
- header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
- header b{font:650 15px/1 var(--mono);letter-spacing:-.02em}
- /* 主机名只说一次。列表里就只需要显示路径了。 */
- .host{font:12px/1 var(--mono);color:var(--dim);min-width:0;
-       overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 auto;max-width:100%}
- .strip{display:flex;gap:6px;align-items:center}
- .strip i{width:10px;height:10px;border-radius:50%;flex:none;
-          background:#131a22;box-shadow:0 0 0 1px #2a3440}
- .count{font:600 13px/1 var(--mono);font-variant-numeric:tabular-nums;color:var(--dim)}
+ /* ── 顶栏 ───────────────────────────────────────────────────
+    品牌名压到最小：用户知道自己在哪个页面，不需要每次都被提醒。
+    真正该一眼看到的，是右边那排状态。 */
+ header{display:flex;align-items:flex-start;gap:20px;flex-wrap:wrap;margin-bottom:20px}
+ .brand{min-width:0;flex:1 1 auto}
+ .brand b{display:block;font:600 12px/1.4 var(--mono);letter-spacing:.04em;
+          color:var(--text-2);text-transform:lowercase}
+ .brand .host{display:block;font:400 12px/1.5 var(--mono);color:var(--text-3);
+              overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+ .fleet{display:flex;align-items:center;gap:9px;flex:none;padding-top:1px}
+ .fleet .dots{display:flex;gap:5px}
+ .fleet .dots i{width:7px;height:7px;border-radius:50%;flex:none;
+                background:transparent;box-shadow:inset 0 0 0 1.5px var(--line-2);
+                transition:background-color .25s ease,box-shadow .25s ease}
+ .fleet .dots i[data-state="on"]{background:var(--ok);box-shadow:0 0 0 2.5px #3ddc971f}
+ .fleet .dots i[data-state="warn"]{background:var(--warn);box-shadow:0 0 0 2.5px #f5b5441f}
+ .fleet .count{font:600 12px/1 var(--mono);font-variant-numeric:tabular-nums;
+               color:var(--text-2);letter-spacing:.02em}
 
- /* ── 指示灯（签名元素）─────────────────────────────────────
-    照物理指示灯做：内凹底座 + 高光 + 点亮时外溢的辉光。
-    三个状态各自含义不同，且不只靠颜色区分：
-      on   = 端口在听              → 亮绿、实心发光
-      off  = 端口没听（不是故障）  → 不亮、暗芯 + 暗红圈
-      warn = 在听但 HTTP 不健康    → 亮琥珀
-    颜色之外还有形状差异，色觉障碍下也分得清。 */
- .lamp{
-   width:13px;height:13px;border-radius:50%;flex:none;
-   background:#151c25;box-shadow:inset 0 1px 3px #000c,0 0 0 1px #2a3440;
-   transition:background-color .2s ease,box-shadow .2s ease;
- }
- .lamp[data-state="on"]{
-   background:radial-gradient(circle at 34% 28%,#f2fff8,transparent 58%),var(--live);
-   box-shadow:0 0 0 1px #0f4025,0 0 9px 1px #3fd07a99,inset 0 0 3px #ffffffcc;
- }
- .lamp[data-state="off"]{
-   background:radial-gradient(circle at 34% 28%,#ffffff26,transparent 58%),#1a1113;
-   box-shadow:0 0 0 1px #4a1d1d,inset 0 1px 3px #000c;
- }
- .lamp[data-state="warn"]{
-   background:radial-gradient(circle at 34% 28%,#fffaf0,transparent 58%),var(--amber);
-   box-shadow:0 0 0 1px #4a3405,0 0 9px 1px #e3a00899,inset 0 0 3px #ffffffcc;
- }
- .strip i[data-state="on"]{background:var(--live);box-shadow:0 0 6px #3fd07a99}
- .strip i[data-state="off"]{background:#241417;box-shadow:0 0 0 1px #4a1d1d}
- .strip i[data-state="warn"]{background:var(--amber);box-shadow:0 0 6px #e3a00899}
-
- /* ── 提示条 ─────────────────────────────────────────────── */
- #msg{margin:0 0 12px;font-size:13px;color:var(--dim)}
- #msg:not(:empty){padding:9px 12px;border-radius:8px;background:#1a212b;border:1px solid var(--rule)}
- #msg[data-tone="bad"]{color:#ffb4b4;border-color:#4a1d1d;background:#1a1113}
- #msg[data-tone="good"]{color:#a7e8c4;border-color:#1d4a30;background:#0f1a14}
-
- /* ── 工具条 ─────────────────────────────────────────────── */
- .bar{display:flex;gap:8px;align-items:center;margin-bottom:14px}
+ /* ── 工具条 ─────────────────────────────────────────────────
+    全部是「安静」的按钮：无填充、无强调色。批量启动是低频操作，
+    它不该比服务状态更显眼。 */
+ .bar{display:flex;align-items:center;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+ .bar .spacer{flex:1 1 auto}
  button{
-   padding:9px 13px;border-radius:8px;border:1px solid var(--rule);
-   background:#1a212b;color:var(--text);font:500 13px/1 system-ui,sans-serif;
-   cursor:pointer;touch-action:manipulation;white-space:nowrap;
-   transition:background-color .15s ease,border-color .15s ease;
+   padding:7px 12px;border-radius:8px;border:1px solid var(--line);
+   background:transparent;color:var(--text-2);
+   font:500 12.5px/1.35 system-ui,sans-serif;cursor:pointer;
+   touch-action:manipulation;white-space:nowrap;
+   transition:color .14s ease,border-color .14s ease,background-color .14s ease;
  }
- button:hover:not(:disabled){background:#232c38}
- button:active:not(:disabled){transform:translateY(1px)}
- button:disabled{opacity:.38;cursor:default}
- button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
- button.primary{background:var(--amber);border-color:#b47f06;color:#1a1200;font-weight:650}
- button.primary:hover:not(:disabled){background:#f0ae12}
- button.icon{padding:9px 12px;font-size:15px;line-height:1}
- /* 自动刷新开关：checkbox 本体视觉隐藏，用 span 画开关。
-   label 包着 input，点击区域和控件是同一个，没有死区。 */
- .tgl{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--dim);
-      cursor:pointer;user-select:none;margin-left:auto}
+ button:hover:not(:disabled){color:var(--text);border-color:var(--line-2);
+                             background:#ffffff08}
+ button:active:not(:disabled){transform:translateY(.5px)}
+ button:disabled{opacity:.3;cursor:default}
+ button:focus-visible{outline:2px solid var(--text-2);outline-offset:2px}
+ .icon-btn{padding:7px 10px;font-size:14px;line-height:1.35}
+
+ /* 自动刷新开关：开启时用中性亮灰而不是绿色 —— 它是个设置，
+   不是状态，不该跟服务指示灯抢同一个语义。 */
+ .tgl{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;
+      color:var(--text-3);cursor:pointer;user-select:none;
+      transition:color .14s ease}
+ .tgl:hover{color:var(--text-2)}
  .tgl input{position:absolute;opacity:0;width:0;height:0}
- .tgl .sw{width:34px;height:19px;border-radius:99px;background:#232c38;position:relative;
-          transition:background-color .18s ease;flex:none}
- .tgl .sw::after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;
-                 border-radius:50%;background:#8b96a5;
+ .tgl .sw{width:32px;height:18px;border-radius:99px;background:var(--surface-2);
+          box-shadow:inset 0 0 0 1px var(--line);position:relative;flex:none;
+          transition:background-color .18s ease,box-shadow .18s ease}
+ .tgl .sw::after{content:"";position:absolute;top:3px;left:3px;width:12px;height:12px;
+                 border-radius:50%;background:var(--text-3);
                  transition:transform .18s ease,background-color .18s ease}
- .tgl input:checked+.sw{background:#1d5c37}
- .tgl input:checked+.sw::after{transform:translateX(15px);background:var(--live)}
- .tgl input:focus-visible+.sw{outline:2px solid var(--amber);outline-offset:2px}
+ .tgl input:checked~.sw{background:#2a3035;box-shadow:inset 0 0 0 1px var(--line-2)}
+ .tgl input:checked~.sw::after{transform:translateX(14px);background:var(--text)}
+ .tgl input:checked~.sw+.lbl{color:var(--text-2)}
+ .tgl input:focus-visible~.sw{outline:2px solid var(--text-2);outline-offset:2px}
+
+ /* ── 提示条 ─────────────────────────────────────────────────
+    平时完全不占位（:empty 时无内边距无背景），避免常驻一条空框。 */
+ #msg{margin:0;font-size:13px;color:var(--text-2)}
+ #msg:not(:empty){margin:0 0 16px;padding:10px 13px;border-radius:var(--r);
+                  background:var(--surface);border:1px solid var(--line)}
+ #msg[data-tone="bad"]{border-color:#5a3a1a;background:#1c1610;color:#f0c88a}
+ #msg[data-tone="good"]{border-color:#1f4636;background:#0f1a16;color:#a5e5c8}
 
  /* ── 服务清单 ───────────────────────────────────────────────
-    同一份 DOM：宽屏排成矩阵，窄屏叠成卡片，靠 grid-template-areas 切换。
-    用 ul/li 而不是 table —— 一旦给 tr/td 套 grid，读屏软件就拿不到表格语义了。 */
- .panel{border:1px solid var(--rule);border-radius:11px;overflow:hidden;background:var(--face)}
- .hdr,.row{
-   display:grid;align-items:center;gap:10px;
-   grid-template-columns:13px minmax(120px,1fr) 44px 56px minmax(56px,auto) auto;
-   grid-template-areas:"lamp who port pid path acts";
- }
- .hdr{padding:9px 14px;background:var(--sunken);border-bottom:1px solid var(--rule);
-      font-size:11px;color:var(--dim);letter-spacing:.06em;text-transform:uppercase}
- .hdr .c-who{grid-area:who} .hdr .c-port{grid-area:port;text-align:right}
- .hdr .c-pid{grid-area:pid;text-align:right} .hdr .c-path{grid-area:path}
- .hdr .c-acts{grid-area:acts;text-align:right}
+    没有表头。端口和 PID 各自带一个极小的大写标签，于是：
+       · 不用表头也能读懂（窄屏藏表头的老问题直接消失了）
+       · 少一整行视觉噪音
+    用 ul/li 而非 table —— 给 tr/td 套 grid 会让读屏软件丢掉表格语义。 */
+ .panel{background:var(--surface);border:1px solid var(--line);
+        border-radius:14px;overflow:hidden}
  .rows{list-style:none;margin:0;padding:0}
- .row{padding:11px 14px;border-bottom:1px solid var(--rule)}
+ .row{
+   display:grid;align-items:center;gap:18px;
+   grid-template-columns:8px minmax(0,1fr) auto auto;
+   grid-template-areas:"dot id meta acts";
+   padding:15px 18px;border-bottom:1px solid var(--line);
+   transition:background-color .14s ease;
+ }
  .row:last-child{border-bottom:0}
- .row[data-state="off"]{background:#0e1218}
- .lamp{grid-area:lamp}
- .who{grid-area:who;min-width:0;display:flex;align-items:center;gap:7px}
- /* 名字单行截断：让每行等高，扫读时不跳。完整名字放在 title 里 */
- .who b{font-weight:600;font-size:14px;min-width:0;overflow:hidden;
-        text-overflow:ellipsis;white-space:nowrap}
- .tag{font:600 9px/1 var(--mono);letter-spacing:.08em;color:var(--dim);
-      border:1px solid var(--rule);border-radius:4px;padding:3px 4px;flex:none}
- .tag.bad{color:#ffc9c9;border-color:#5a2323;background:#241315}
- .num{font:13px/1 var(--mono);font-variant-numeric:tabular-nums;color:var(--dim);
-      white-space:nowrap;text-align:right}
- .num[data-empty]{opacity:.3}
- .port{grid-area:port} .pid{grid-area:pid}
- .path{grid-area:path;font:13px/1 var(--mono);color:#6cb6ff;text-decoration:none;
-       max-width:100%;justify-self:start;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
- .path:hover{text-decoration:underline}
- .path.dead{color:var(--dim);cursor:default}
- .acts{grid-area:acts;display:flex;gap:6px;justify-content:flex-end}
- .acts button{padding:7px 11px;font-size:12px}
- .spin{display:inline-block;width:12px;height:12px;border:2px solid var(--dim);
-       border-top-color:transparent;border-radius:50%;animation:s .7s linear infinite}
+ .row:hover{background:#ffffff05}
+ .row[data-state="off"] .name,.row[data-state="off"] .meta{opacity:.62}
+
+ /* 状态点：在线实心、异常琥珀、离线只有一圈中性描边。
+    颜色之外还有「实心/空心」的形状差异，色觉障碍下同样分得清。 */
+ .dot{grid-area:dot;width:8px;height:8px;border-radius:50%;flex:none;
+      background:transparent;box-shadow:inset 0 0 0 1.5px var(--line-2);
+      transition:background-color .25s ease,box-shadow .25s ease}
+ .dot[data-state="on"]{background:var(--ok);box-shadow:0 0 0 3px #3ddc971f}
+ .dot[data-state="warn"]{background:var(--warn);box-shadow:0 0 0 3px #f5b5441f}
+
+ .id{grid-area:id;min-width:0}
+ .name-line{display:flex;align-items:center;gap:8px;min-width:0}
+ .name{font-weight:550;font-size:14.5px;letter-spacing:-.005em;
+       overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+ .tag{font:600 9.5px/1 var(--mono);letter-spacing:.06em;color:var(--text-3);
+      border:1px solid var(--line-2);border-radius:4px;padding:3px 4px;flex:none}
+ .sub{display:flex;align-items:center;gap:7px;margin-top:3px;
+      font-size:12.5px;color:var(--text-3);min-width:0}
+ .state{flex:none}
+ .state[data-state="on"]{color:var(--ok)}
+ .state[data-state="warn"]{color:var(--warn)}
+ .state[data-state="off"]{color:var(--text-3)}
+ .sep{color:var(--line-2);flex:none}
+ .code{font:500 12px/1 var(--mono);color:var(--warn);flex:none}
+ /* 链接不用蓝色：它只是「可以点」，不是「需要注意」 */
+ .path{color:var(--text-2);text-decoration:none;font:12.5px/1 var(--mono);
+       overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+       border-bottom:1px solid transparent;transition:color .14s ease,border-color .14s ease}
+ a.path:hover{color:var(--text);border-bottom-color:var(--line-2)}
+ .path.dead{color:var(--text-3);cursor:default}
+
+ .meta{grid-area:meta;display:flex;gap:18px;align-items:baseline;flex:none}
+ .kv{display:flex;align-items:baseline;gap:6px}
+ .k{font:500 9.5px/1 var(--mono);letter-spacing:.07em;color:var(--text-3);
+    text-transform:uppercase}
+ .v{font:500 12.5px/1 var(--mono);font-variant-numeric:tabular-nums;
+    color:var(--text-2);min-width:3.2em;text-align:right}
+ .v[data-empty]{opacity:.35}
+
+ .acts{grid-area:acts;display:flex;gap:6px;justify-content:flex-end;flex:none}
+ .acts button{padding:6px 11px;font-size:12px}
+ .spin{display:inline-block;width:13px;height:13px;border:1.5px solid var(--line-2);
+       border-top-color:var(--text-2);border-radius:50%;animation:s .7s linear infinite}
  @keyframes s{to{transform:rotate(360deg)}}
- .empty{padding:26px 14px;text-align:center;color:var(--dim);font-size:13px}
- /* 首屏点亮：灯从上到下依次亮起，像控制台通电。
-     只做这一次，之后刷新不再重放 —— 每 5 秒闪一次会很烦。 */
- .boot .row{animation:rise .3s ease backwards}
- @keyframes rise{from{opacity:0;transform:translateY(4px)}}
+ .empty{padding:34px 18px;text-align:center;color:var(--text-3);font-size:13px}
+ /* 首屏点亮：只放一次，之后每 5 秒的刷新不再重放 —— 否则会一直闪。 */
+ .boot .row{animation:rise .28s ease backwards}
+ @keyframes rise{from{opacity:0;transform:translateY(3px)}}
  .vh{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
      clip:rect(0 0 0 0);white-space:nowrap;border:0}
 
- /* ── 窄屏：矩阵塌成卡片，按钮拉满整行给指头 ───────────────── */
+ /* ── 窄屏：状态与名字一行，元信息与操作各占一行 ───────────── */
  @media (max-width:640px){
-   body{padding:14px;padding-bottom:max(14px,env(safe-area-inset-bottom))}
-   .hdr{display:none}
+   body{padding:20px 14px 48px;
+        padding-bottom:max(48px,env(safe-area-inset-bottom))}
    .row{
-     grid-template-columns:13px 1fr;
-     grid-template-areas:"lamp who" "nums nums" "path path" "acts acts";
-     gap:9px 10px;padding:13px 14px;
+     grid-template-columns:8px minmax(0,1fr);
+     grid-template-areas:"dot id" ". meta" ". acts";
+     gap:11px 14px;padding:15px 16px;
    }
-   .port{grid-area:nums;text-align:left}
-   .pid{grid-area:nums;justify-self:end}
-   /* 表头在窄屏被藏了，用伪元素补回字段名，免得两个数字分不清 */
-   .port::before{content:"端口 ";opacity:.6}
-   .pid::before{content:"PID ";opacity:.6}
-   .acts{justify-content:stretch}
-   .acts button{flex:1;min-height:40px;padding:10px 4px}
-   /* 工具条按钮也拉到 40px：手机上 33px 的按钮点起来发飘 */
-   .bar button{min-height:40px;padding:10px 14px}
-   .bar button.icon{padding:10px 13px}
+   .meta{gap:22px}
+   .v{text-align:left;min-width:0}
+   /* 手机上按钮要够大才点得中；同时拉满整行，指头不用瞄 */
+   .acts{justify-content:stretch;gap:7px;margin-top:1px}
+   .acts button{flex:1;min-height:42px;padding:11px 4px;font-size:12.5px;
+                border-color:var(--line-2)}
+   .bar button{min-height:40px;padding:10px 13px}
    .tgl{margin-left:0}
-   .bar{flex-wrap:wrap}
  }
  @media (prefers-reduced-motion:reduce){
    *{transition:none!important;animation:none!important}
  }
 </style></head><body>
 <h1 class="vh">服务控制台</h1>
+
 <header>
-  <b translate="no">supervisord-center</b>
-  <span class="host" id="host" translate="no"></span>
-  <div class="strip" id="strip" aria-hidden="true"></div>
-  <span class="count" id="count" aria-live="polite"></span>
+  <div class="brand">
+    <b translate="no">supervisord-center</b>
+    <span class="host" id="host" translate="no"></span>
+  </div>
+  <div class="fleet">
+    <span class="dots" id="dots" aria-hidden="true"></span>
+    <span class="count" id="count" aria-live="polite"></span>
+  </div>
 </header>
+
 <p id="msg" role="status" aria-live="polite"></p>
+
 <div class="bar">
-  <button class="primary" id="startAll">全部启动</button>
-  <button class="icon" id="refresh" aria-label="刷新" title="刷新">⟳</button>
-  <label class="tgl"><input type="checkbox" id="auto" checked><span class="sw"></span>自动</label>
+  <button id="startAll">全部启动</button>
+  <button class="icon-btn" id="refresh" aria-label="刷新" title="刷新">&#8635;</button>
+  <span class="spacer"></span>
+  <label class="tgl"><input type="checkbox" id="auto" checked><span class="sw"></span><span class="lbl">自动刷新</span></label>
 </div>
+
 <main class="panel">
-  <div class="hdr" aria-hidden="true">
-    <span class="c-who">服务</span><span class="c-port">端口</span>
-    <span class="c-pid">PID</span><span class="c-path">地址</span>
-    <span class="c-acts">操作</span>  </div>
   <ul class="rows" id="rows"></ul>
 </main>
+
 <script>
 const BASE = location.pathname.endsWith('/') ? location.pathname : location.pathname + '/';
 const $ = (id) => document.getElementById(id);
@@ -908,45 +947,58 @@ function esc(s) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-// 灯的状态：在线但 HTTP 探针不健康 → warn，其余按 running 二选一。
-// 「离线」不是故障，只是没开，所以不点亮、也不喊。
-function lampState(s) {
+// 三种状态。注意「离线」不是故障，只是没开，所以它没有颜色。
+function stateOf(s) {
   if (!s.running) return 'off';
   if (s.http && s.http.status && !s.http.ok) return 'warn';
   return 'on';
 }
-const STATE_TEXT = { on: '在线', off: '离线', warn: '在线但 HTTP 异常' };
+const STATE_TEXT = { on: '在线', off: '已停止', warn: '异常' };
+
+// 从完整地址里截出路径部分。用 indexOf 找 '//' 而不是正则 ——
+// 页面禁止出现反斜杠（会破坏 JS 模板字面量），用字符串切片绕开。
+function pathOf(url) {
+  if (!url) return '';
+  const i = url.indexOf('//');
+  const j = i < 0 ? -1 : url.indexOf('/', i + 2);
+  return j < 0 ? '/' : url.slice(j);
+}
 
 function rowHtml(s, busy, idx) {
-  const st = lampState(s);
+  const st = stateOf(s);
   const full = s.tailnetUrl || s.localUrl || '';
-  // 只显示路径：每一行都重复同一个主机名纯属噪音，主机名在标题里说明一次就够了。
-  // 完整地址放进 title 和 href，悬停或点开都能拿到。（绕开正则，避免反斜杠）
-  let label = full;
-  if (s.tailnetUrl) {
-    const i = s.tailnetUrl.indexOf('//');
-    const j = i < 0 ? -1 : s.tailnetUrl.indexOf('/', i + 2);
-    label = j < 0 ? '/' : s.tailnetUrl.slice(j);
-  }
+
+  // 只显示路径：每行都重复同一个主机名纯属噪音，主机名在顶上说过一次了。
+  // 完整地址放在 title 和 href 里，悬停或点开都能拿到。
+  const label = pathOf(s.tailnetUrl) || pathOf(full) || '—';
   const href = s.tailnetUrl
     ? '<a class="path" href="' + esc(s.tailnetUrl) + '" target="_blank" rel="noopener" title="' + esc(s.tailnetUrl) + '">' + esc(label) + '</a>'
-    : '<span class="path dead" title="' + esc(full) + '">' + esc(label || '—') + '</span>';
-  // HTTP 状态只在**不正常**时才显示。健康的 200 是废话，而且会把行高挤乱。
-  const warn = (st === 'warn' && s.http && s.http.status)
-    ? '<span class="tag bad">HTTP ' + esc(s.http.status) + '</span>' : '';
+    : '<span class="path dead" title="' + esc(full) + '">' + esc(label) + '</span>';
+
+  // HTTP 码只在**不正常**时出现。健康的 200 是废话。
+  const code = (st === 'warn' && s.http && s.http.status)
+    ? '<span class="sep">·</span><span class="code">HTTP ' + esc(s.http.status) + '</span>' : '';
+  const pathBit = s.tailnetUrl ? '<span class="sep">·</span>' + href : '';
+
   const acts = busy
     ? '<span class="spin" role="img" aria-label="处理中"></span>'
     : '<button data-act="start" data-id="' + esc(s.id) + '"' + (s.running ? ' disabled' : '') + '>启动</button>' +
       '<button data-act="restart" data-id="' + esc(s.id) + '">重启</button>' +
       '<button data-act="stop" data-id="' + esc(s.id) + '"' + (s.running ? '' : ' disabled') + '>停止</button>';
-  return '<li class="row" data-state="' + st + '"' + (booted ? '' : ' style="animation-delay:' + Math.min(idx * 45, 360) + 'ms"') + '>' +
-    '<span class="lamp" data-state="' + st + '" role="img" aria-label="' + STATE_TEXT[st] + '" title="' + STATE_TEXT[st] + '"></span>' +
-    '<span class="who"><b title="' + esc(s.name) + '">' + esc(s.name) + '</b>' +
-      (s.autostart ? '<span class="tag">自启</span>' : '') + warn + '</span>' +
-    '<span class="num port"' + (s.port ? '' : ' data-empty') + ' aria-label="端口 ' + esc(s.port || '无') + '">' + esc(s.port || '—') + '</span>' +
-    '<span class="num pid"' + (s.pid ? '' : ' data-empty') + ' aria-label="进程号 ' + esc(s.pid || '无') + '">' + esc(s.pid || '—') + '</span>' +
-    href +
-    '<span class="acts">' + acts + '</span></li>';
+
+  return '<li class="row" data-state="' + st + '"' + (booted ? '' : ' style="animation-delay:' + Math.min(idx * 40, 320) + 'ms"') + '>' +
+    '<span class="dot" data-state="' + st + '" role="img" aria-label="' + STATE_TEXT[st] + '"></span>' +
+    '<div class="id">' +
+      '<div class="name-line"><span class="name" title="' + esc(s.name) + '">' + esc(s.name) + '</span>' +
+        (s.autostart ? '<span class="tag">自启</span>' : '') + '</div>' +
+      '<div class="sub"><span class="state" data-state="' + st + '">' + STATE_TEXT[st] + '</span>' +
+        code + pathBit + '</div>' +
+    '</div>' +
+    '<div class="meta">' +
+      '<span class="kv"><span class="k">端口</span><span class="v"' + (s.port ? '' : ' data-empty') + '>' + esc(s.port || '—') + '</span></span>' +
+      '<span class="kv"><span class="k">PID</span><span class="v"' + (s.pid ? '' : ' data-empty') + '>' + esc(s.pid || '—') + '</span></span>' +
+    '</div>' +
+    '<div class="acts">' + acts + '</div></li>';
 }
 
 let busy = {};
@@ -959,17 +1011,16 @@ function render() {
   } else {
     rows.innerHTML = services.map((s, i) => rowHtml(s, !!busy[s.id], i)).join('');
   }
-  // 舰队灯带：和列表同源，只是压缩成一行
-  $('strip').innerHTML = services.map((s) =>
-    '<i data-state="' + lampState(s) + '"></i>').join('');
+  // 舰队视图：和列表同源，只是压缩成一行，用来「一眼扫完全部」
+  $('dots').innerHTML = services.map((s) =>
+    '<i data-state="' + stateOf(s) + '"></i>').join('');
   const on = services.filter((s) => s.running).length;
   $('count').textContent = on + '/' + services.length;
   $('count').setAttribute('aria-label', services.length + ' 个服务，' + on + ' 个在线');
-  // 首屏点亮动画只放一次，之后每 5 秒的刷新不再重放
   if (!booted && services.length) {
     document.querySelector('.panel').classList.add('boot');
     booted = true;
-    setTimeout(() => document.querySelector('.panel').classList.remove('boot'), 1200);
+    setTimeout(() => document.querySelector('.panel').classList.remove('boot'), 1100);
   }
 }
 
@@ -983,7 +1034,6 @@ async function load() {
   const data = await api('services');
   services = data.services || [];
   render();
-  // 主机名从第一条 tailnetUrl 里取，取不到就不显示
   const first = services.find((s) => s.tailnetUrl);
   const host = $('host');
   if (first) {
@@ -1000,7 +1050,7 @@ async function act(id, what) {
   busy[id] = true; render(); say('');
   try {
     const r = await api('services/' + encodeURIComponent(id) + '/' + what, { method: 'POST' });
-    // 失败要说清楚「哪个 + 为什么」，只报「失败」等于没说
+    // 失败要说清「哪个 + 为什么」，只报「失败」等于没说
     if (r.ok === false) say(id + ' ' + what + ' 失败：' + (r.message || r.error || '未知'), 'bad');
     else if (what === 'start' && r.alreadyRunning) say(id + ' 本来就在运行');
     else if (what === 'start' && r.listening === false) say(id + ' 已拉起，端口还没就绪', 'bad');

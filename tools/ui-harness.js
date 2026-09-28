@@ -14,8 +14,16 @@ const path = require('node:path');
 
 const ROOT = path.join(os.tmpdir(), 'sdc-ui');
 const PORT = 3091;
-// 试验台自己的假令牌 —— 这里**绝不能**填真实令牌（会随代码进版本库）。
-const TOKEN = process.env.SDC_UI_TOKEN || 'ui-harness-local-only';
+// 试验台恒用这个假令牌。
+//
+// 这里曾经写成 process.env.SDC_UI_TOKEN || 'ui-harness-local-only'，本意是
+// 「允许覆盖」，实际后果很糟：我在同一个 shell 里为了跑生产自检导出过真实
+// 令牌，随后启动试验台，它就**继承并使用了真实令牌**，还把它写进了临时目录的
+// 配置文件。于是「试验台」和「生产」的凭据变成同一个 —— 而 ui-check.js 正是
+// 靠令牌区分两者来决定要不要点按钮的，边界就此失效。
+//
+// 沙箱的凭据必须写死：能被环境变量改掉的隔离，不叫隔离。
+const TOKEN = 'ui-harness-local-only';
 const PIDFILE = path.join(ROOT, 'pids.json');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
